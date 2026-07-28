@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { addGame, editGame } from '../api/appsScript';
+import { addGame, editGame, getSettings } from '../api/appsScript';
 import type { Game, Player, PlayerInput } from '../types';
+
+const MAX_PLAYERS = 4;
 
 interface Props {
   initialDate: string;
@@ -49,6 +51,25 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Editing keeps the game's frozen price; new games preview at the current rate.
+  const [price, setPrice] = useState<number | null>(
+    editingGame ? editingGame.price_per_shuttle_at_time : null
+  );
+
+  useEffect(() => {
+    if (editingGame) return;
+    let cancelled = false;
+    getSettings()
+      .then((s) => {
+        if (!cancelled) setPrice(s.price_per_shuttle);
+      })
+      .catch(() => {
+        /* preview is optional — saving still works */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingGame]);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -67,6 +88,17 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
     setSlots((prev) => prev.map((s, idx) => (idx === i ? value : s)));
   }
 
+  function addSlot() {
+    setSlots((prev) =>
+      prev.length >= MAX_PLAYERS ? prev : [...prev, { nickname: '', department: '' }]
+    );
+  }
+
+  function removeSlot(i: number) {
+    setSlots((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+    setActiveSlot(null);
+  }
+
   function suggestionsFor(i: number) {
     const q = slots[i].nickname.trim();
     const list = q ? players.filter((p) => p.nickname.includes(q)) : players;
@@ -77,8 +109,12 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
     e.preventDefault();
     setError(null);
 
+    if (slots.length < 1) {
+      setError('ต้องมีผู้เล่นอย่างน้อย 1 คน');
+      return;
+    }
     if (slots.some((s) => !s.nickname.trim() || !s.department.trim())) {
-      setError('กรุณากรอกชื่อเล่นและกองให้ครบทั้ง 4 คน');
+      setError('กรุณากรอกชื่อเล่นและกองให้ครบทุกคน (หรือลบช่องที่ไม่ใช้ออก)');
       return;
     }
     const count = Number(shuttles);
@@ -114,7 +150,9 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
           <div>
             <div className="sheet-title">{editingGame ? 'แก้ไขเกม' : 'บันทึกเกม'}</div>
             <div className="sheet-subtitle">
-              {editingGame ? 'แก้ไขข้อมูลเกมที่บันทึกไว้' : 'เลือกวันที่และกรอกผู้เล่น 4 คน'}
+              {editingGame
+                ? 'แก้ไขข้อมูลเกมที่บันทึกไว้'
+                : 'เลือกวันที่และกรอกผู้เล่น 1–4 คน (ค่าลูกขนไก่หารตามจำนวนคน)'}
             </div>
           </div>
           <button type="button" className="sheet-close" onClick={onClose} aria-label="ปิด">
@@ -136,7 +174,19 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
 
           {slots.map((slot, i) => (
             <div key={i} className="sheet-player">
-              <span className="sheet-player-index">ผู้เล่นคนที่ {i + 1}</span>
+              <div className="sheet-player-head">
+                <span className="sheet-player-index">ผู้เล่นคนที่ {i + 1}</span>
+                {slots.length > 1 && (
+                  <button
+                    type="button"
+                    className="sheet-player-remove"
+                    onClick={() => removeSlot(i)}
+                    aria-label={`ลบผู้เล่นคนที่ ${i + 1}`}
+                  >
+                    ลบ
+                  </button>
+                )}
+              </div>
               <div className="sheet-grid-2">
                 <div className="sheet-field sheet-autocomplete">
                   <label>ชื่อเล่น *</label>
@@ -176,6 +226,12 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
             </div>
           ))}
 
+          {slots.length < MAX_PLAYERS && (
+            <button type="button" className="sheet-add-player" onClick={addSlot}>
+              ＋ เพิ่มผู้เล่น ({slots.length}/{MAX_PLAYERS})
+            </button>
+          )}
+
           <div className="sheet-field">
             <label htmlFor="sheet-shuttles">จำนวนลูกขนไก่ที่ใช้ *</label>
             <input
@@ -189,6 +245,21 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
               onChange={(e) => setShuttles(e.target.value)}
             />
           </div>
+
+          {price !== null && Number(shuttles) > 0 && (
+            <div className="cost-preview">
+              <div className="cost-preview-row">
+                <span>
+                  {shuttles} ลูก × {price.toFixed(2)} บ.
+                </span>
+                <strong>{(price * Number(shuttles)).toFixed(2)} บ.</strong>
+              </div>
+              <div className="cost-preview-row split">
+                <span>หารกับผู้เล่น {slots.length} คน</span>
+                <strong>คนละ {((price * Number(shuttles)) / slots.length).toFixed(2)} บ.</strong>
+              </div>
+            </div>
+          )}
 
           {error && <div className="error-banner">{error}</div>}
 

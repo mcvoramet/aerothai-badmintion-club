@@ -1,13 +1,19 @@
+// A game holds 1–4 players; unused player slots are left blank in the sheet.
 function rowToGame_(r) {
+  var players = [];
+  for (var i = 1; i <= 4; i++) {
+    var key = r['player' + i + '_key'];
+    if (!key) continue;
+    players.push({
+      player_key: key,
+      nickname: r['player' + i + '_nickname'],
+      department: r['player' + i + '_department'],
+    });
+  }
   return {
     game_id: r.game_id,
     timestamp: r.timestamp,
-    players: [
-      { player_key: r.player1_key, nickname: r.player1_nickname, department: r.player1_department },
-      { player_key: r.player2_key, nickname: r.player2_nickname, department: r.player2_department },
-      { player_key: r.player3_key, nickname: r.player3_nickname, department: r.player3_department },
-      { player_key: r.player4_key, nickname: r.player4_nickname, department: r.player4_department },
-    ],
+    players: players,
     shuttles_used: Number(r.shuttles_used),
     price_per_shuttle_at_time: Number(r.price_per_shuttle_at_time),
     total_cost: Number(r.total_cost),
@@ -17,8 +23,13 @@ function rowToGame_(r) {
 }
 
 function validateGamePayload_(payload) {
-  if (!payload || !Array.isArray(payload.players) || payload.players.length !== 4) {
-    throw new Error('ต้องระบุผู้เล่นให้ครบ 4 คน');
+  if (
+    !payload ||
+    !Array.isArray(payload.players) ||
+    payload.players.length < 1 ||
+    payload.players.length > 4
+  ) {
+    throw new Error('ต้องระบุผู้เล่นอย่างน้อย 1 คน และไม่เกิน 4 คน');
   }
   payload.players.forEach(function (p) {
     if (!p || !String(p.nickname || '').trim() || !String(p.department || '').trim()) {
@@ -95,7 +106,8 @@ function addGame(payload) {
     var settings = getSettings();
     var price = settings.price_per_shuttle;
     var total = round2_(shuttles * price);
-    var perPlayer = round2_(total / 4);
+    // Split across however many players were logged, not always 4.
+    var perPlayer = round2_(total / payload.players.length);
     var ts = resolveTimestamp_(payload.timestamp);
     var gameId = makeId('G');
 
@@ -114,9 +126,11 @@ function addGame(payload) {
       deleted: '',
     };
     for (var i = 0; i < 4; i++) {
-      row['player' + (i + 1) + '_key'] = keys[i];
-      row['player' + (i + 1) + '_nickname'] = String(payload.players[i].nickname).trim();
-      row['player' + (i + 1) + '_department'] = String(payload.players[i].department).trim();
+      var slot = 'player' + (i + 1);
+      row[slot + '_key'] = i < keys.length ? keys[i] : '';
+      row[slot + '_nickname'] = i < keys.length ? String(payload.players[i].nickname).trim() : '';
+      row[slot + '_department'] =
+        i < keys.length ? String(payload.players[i].department).trim() : '';
     }
     var sheet = getSheet(SHEET_NAMES.GAMES);
     appendObjectRow(sheet, row);
@@ -141,7 +155,7 @@ function editGame(payload) {
     // Price is frozen from the original entry — edits never re-price at today's setting.
     var price = Number(existing.price_per_shuttle_at_time);
     var total = round2_(shuttles * price);
-    var perPlayer = round2_(total / 4);
+    var perPlayer = round2_(total / payload.players.length);
     var ts = nowIso();
 
     var keys = payload.players.map(function (p) {
@@ -160,10 +174,14 @@ function editGame(payload) {
       edited_at: ts,
       deleted: existing.deleted || '',
     };
+    // Slots beyond the new player count are blanked out, so shrinking a game
+    // from 4 players to 2 doesn't leave stale names behind.
     for (var i = 0; i < 4; i++) {
-      row['player' + (i + 1) + '_key'] = keys[i];
-      row['player' + (i + 1) + '_nickname'] = String(payload.players[i].nickname).trim();
-      row['player' + (i + 1) + '_department'] = String(payload.players[i].department).trim();
+      var slot = 'player' + (i + 1);
+      row[slot + '_key'] = i < keys.length ? keys[i] : '';
+      row[slot + '_nickname'] = i < keys.length ? String(payload.players[i].nickname).trim() : '';
+      row[slot + '_department'] =
+        i < keys.length ? String(payload.players[i].department).trim() : '';
     }
     updateObjectRow(sheet, existing.__row, row);
     return rowToGame_(row);
