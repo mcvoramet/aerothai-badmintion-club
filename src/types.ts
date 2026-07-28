@@ -47,21 +47,11 @@ export interface OutstandingPlayer {
   last_game_at: string | null;
 }
 
-export interface StatsSummary {
-  period: string;
-  games: number;
-  shuttles_used: number;
-  total_cost: number;
-  players_involved: number;
-}
-
 export interface Settings {
   price_per_shuttle: number;
   payment_details: string;
   updated_at: string | null;
 }
-
-export type StatsPeriod = 'daily' | 'weekly' | 'monthly' | 'all';
 
 export interface PlayerInput {
   nickname: string;

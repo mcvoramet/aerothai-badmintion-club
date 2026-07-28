@@ -35,12 +35,6 @@ function handleRequest_(e, method) {
       case 'getPlayerBalance':
         result = getPlayerBalance(payload);
         break;
-      case 'getStats':
-        result = getStats(payload);
-        break;
-      case 'getSummary':
-        result = getSummary(payload);
-        break;
       case 'getOutstanding':
         result = getOutstanding();
         break;

@@ -1,4 +1,4 @@
-export type TabKey = 'log' | 'stats' | 'pay' | 'settings';
+export type TabKey = 'log' | 'pay' | 'settings';
 
 interface Tab {
   key: TabKey;
@@ -8,7 +8,6 @@ interface Tab {
 
 const TABS: Tab[] = [
   { key: 'log', label: 'บันทึกเกม', icon: '🏸' },
-  { key: 'stats', label: 'สถิติ', icon: '📊' },
   { key: 'pay', label: 'ค้นหา & จ่าย', icon: '💸' },
   { key: 'settings', label: 'ตั้งค่า', icon: '⚙️' },
 ];

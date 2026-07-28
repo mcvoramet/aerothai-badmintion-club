@@ -47,7 +47,6 @@ const checks = [
   ['getSettings', () => get('getSettings')],
   ['getPlayers', () => get('getPlayers')],
   ['getOutstanding', () => get('getOutstanding')],
-  ['getSummary', () => get('getSummary', { period: 'monthly' })],
   [
     'getGamesInRange',
     () => {

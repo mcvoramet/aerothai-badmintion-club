@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import TabBar, { type TabKey } from './components/TabBar';
 import CalendarView from './components/CalendarView';
-import StatsView from './components/StatsView';
 import SearchAndPayView from './components/SearchAndPayView';
 import SettingsView from './components/SettingsView';
 import { usePlayers } from './hooks/usePlayers';
 
 const TITLES: Record<TabKey, string> = {
   log: 'บันทึกเกม',
-  stats: 'สถิติค่าลูกขนไก่',
   pay: 'ค้นหา & ชำระเงิน',
   settings: 'ตั้งค่า',
 };
@@ -21,7 +19,7 @@ export default function App() {
     <div className="app-shell">
       <header className="app-header">
         <h1>{TITLES[tab]}</h1>
-        <p>ชมรมแบดมินตัน — คำนวณค่าลูกขนไก่</p>
+        <p>AEROTHAI Badminton Club — App คำนวณค่าลูกขนไก่</p>
       </header>
 
       {tab === 'log' && (
@@ -32,12 +30,6 @@ export default function App() {
               void players.refresh();
             }}
           />
-        </div>
-      )}
-
-      {tab === 'stats' && (
-        <div className="view">
-          <StatsView />
         </div>
       )}
 

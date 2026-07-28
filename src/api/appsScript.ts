@@ -5,8 +5,6 @@ import type {
   Player,
   PlayerBalance,
   Settings,
-  StatsPeriod,
-  StatsSummary,
 } from '../types';
 
 const BASE_URL = import.meta.env.VITE_APPS_SCRIPT_URL as string | undefined;
@@ -76,10 +74,6 @@ export function getGamesInRange(start: string, end: string): Promise<Game[]> {
 
 export function getPlayerBalance(playerKey: string): Promise<PlayerBalance> {
   return apiGet<PlayerBalance>('getPlayerBalance', { player_key: playerKey });
-}
-
-export function getSummary(period: StatsPeriod, date?: string): Promise<StatsSummary> {
-  return apiGet<StatsSummary>('getSummary', date ? { period, date } : { period });
 }
 
 export function getOutstanding(): Promise<OutstandingPlayer[]> {
