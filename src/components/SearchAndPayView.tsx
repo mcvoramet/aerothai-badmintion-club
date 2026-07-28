@@ -79,18 +79,21 @@ export default function SearchAndPayView() {
                 {filtered.map((row) => {
                   const rank = rows.indexOf(row) + 1;
                   return (
-                    <li key={row.player_key}>
-                      <button
-                        type="button"
-                        className="rank-item"
-                        onClick={() => setSelected(row)}
-                      >
+                    <li key={row.player_key} className="rank-card">
+                      <div className="rank-head">
                         <span className={`rank-badge${rank <= 3 ? ' top' : ''}`}>{rank}</span>
                         <span className="rank-name">
                           {row.nickname}
                           <span className="balance-label"> {row.department}</span>
                         </span>
                         <span className="rank-amount">{row.balance.toFixed(2)} ฿</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-block rank-pay-btn"
+                        onClick={() => setSelected(row)}
+                      >
+                        ยืนยันชำระเงิน
                       </button>
                     </li>
                   );
