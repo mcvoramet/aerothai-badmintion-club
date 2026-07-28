@@ -139,13 +139,22 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
                 <div className="sheet-existing-head">
                   <span>รายการเกมที่ค้างชำระ</span>
                 </div>
-                {detail.games.map((game) => (
-                  <div key={game.game_id} className="pay-game-row">
-                    <span>{thaiDate(game.timestamp)}</span>
-                    <span className="balance-label">{game.shuttles_used} ลูก</span>
-                    <span className="game-card-cost">{game.cost_per_player.toFixed(2)} ฿</span>
-                  </div>
-                ))}
+                {detail.games.map((game) => {
+                  const due = game.amount_due ?? game.cost_per_player;
+                  const partial = due < game.cost_per_player - 0.001;
+                  return (
+                    <div key={game.game_id} className="pay-game-row">
+                      <span>
+                        {thaiDate(game.timestamp)}
+                        {partial && (
+                          <span className="balance-label"> · หักยอดที่จ่ายไว้แล้ว</span>
+                        )}
+                      </span>
+                      <span className="balance-label">{game.shuttles_used} ลูก</span>
+                      <span className="game-card-cost">{due.toFixed(2)} ฿</span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 
