@@ -22,9 +22,6 @@ export interface Game {
   total_cost: number;
   cost_per_player: number;
   edited_at: string | null;
-  /** Only set on unpaid-game lists: what's still owed on this game. Equals
-   *  cost_per_player unless an earlier payment partly covered it. */
-  amount_due?: number;
 }
 
 export interface PlayerBalance {
