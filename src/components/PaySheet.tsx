@@ -158,6 +158,16 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
               </div>
             )}
 
+            <div className="pay-note">
+              <span className="pay-note-icon" aria-hidden="true">
+                🧾
+              </span>
+              <span>
+                โปรดส่งสลิปหลักฐานการโอนเงินในกลุ่ม Line “เก็บตังค์ค่าลูกแบด AEROTHAI”
+                หรือหากไม่อยู่ในกลุ่มโปรดแจ้งคนเล่นใน คอร์ด 1 ได้เลยครับ
+              </span>
+            </div>
+
             <div className="sheet-actions">
               <button type="button" className="sheet-btn-cancel" onClick={onClose}>
                 ปิด

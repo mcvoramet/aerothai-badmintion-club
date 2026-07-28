@@ -975,6 +975,29 @@ select {
   margin-bottom: 1rem;
 }
 
+/* Reminder to send the transfer slip — sits right above the confirm button
+   so it's read at the moment it matters. */
+.pay-note {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-primary-bright);
+  border-radius: var(--radius-sm);
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 1rem;
+  font-size: 0.82rem;
+  line-height: 1.55;
+  color: var(--color-text);
+}
+
+.pay-note-icon {
+  font-size: 1rem;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
 .pay-account-text {
   margin: 0.4rem 0 0;
   padding: 0.75rem;
