@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { addGame, editGame, getSettings } from '../api/appsScript';
+import { addGame, editGame } from '../api/appsScript';
 import type { Game, Player, PlayerInput } from '../types';
 
 const MAX_PLAYERS = 4;
@@ -8,8 +8,11 @@ interface Props {
   initialDate: string;
   editingGame: Game | null;
   players: Player[];
+  /** Current rate, already loaded with the calendar — avoids a round trip
+   *  just to render the cost preview. Editing uses the game's frozen price. */
+  pricePerShuttle: number | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (saved: Game) => void;
 }
 
 function emptySlots(): PlayerInput[] {
@@ -36,7 +39,14 @@ function timestampFor(dateKey: string, keepTimeFrom?: string) {
   return new Date(y, m - 1, d, src.getHours(), src.getMinutes(), src.getSeconds()).toISOString();
 }
 
-export default function GameSheet({ initialDate, editingGame, players, onClose, onSaved }: Props) {
+export default function GameSheet({
+  initialDate,
+  editingGame,
+  players,
+  pricePerShuttle,
+  onClose,
+  onSaved,
+}: Props) {
   const [slots, setSlots] = useState<PlayerInput[]>(() =>
     editingGame
       ? editingGame.players.map((p) => ({ nickname: p.nickname, department: p.department }))
@@ -52,24 +62,7 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Editing keeps the game's frozen price; new games preview at the current rate.
-  const [price, setPrice] = useState<number | null>(
-    editingGame ? editingGame.price_per_shuttle_at_time : null
-  );
-
-  useEffect(() => {
-    if (editingGame) return;
-    let cancelled = false;
-    getSettings()
-      .then((s) => {
-        if (!cancelled) setPrice(s.price_per_shuttle);
-      })
-      .catch(() => {
-        /* preview is optional — saving still works */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [editingGame]);
+  const price = editingGame ? editingGame.price_per_shuttle_at_time : pricePerShuttle;
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -130,9 +123,10 @@ export default function GameSheet({ initialDate, editingGame, players, onClose, 
         shuttles_used: count,
         timestamp: timestampFor(date, editingGame?.timestamp),
       };
-      if (editingGame) await editGame(editingGame.game_id, payload);
-      else await addGame(payload);
-      onSaved();
+      const saved = editingGame
+        ? await editGame(editingGame.game_id, payload)
+        : await addGame(payload);
+      onSaved(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกเกมไม่สำเร็จ');
     } finally {

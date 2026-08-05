@@ -1,26 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getOutstanding, getSettings } from '../api/appsScript';
+import { readCache, writeCache } from '../lib/cache';
 import PaySheet from './PaySheet';
 import type { OutstandingPlayer } from '../types';
 
+const CACHE_KEY = 'outstanding';
+
+interface CachedPay {
+  rows: OutstandingPlayer[];
+  paymentDetails: string;
+}
+
 export default function SearchAndPayView() {
+  const cached = useMemo(() => readCache<CachedPay>(CACHE_KEY), []);
   const [query, setQuery] = useState('');
-  const [rows, setRows] = useState<OutstandingPlayer[]>([]);
-  const [paymentDetails, setPaymentDetails] = useState('');
+  const [rows, setRows] = useState<OutstandingPlayer[]>(cached?.rows ?? []);
+  const [paymentDetails, setPaymentDetails] = useState(cached?.paymentDetails ?? '');
   const [selected, setSelected] = useState<OutstandingPlayer | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Cached data renders immediately; only a cold start shows a spinner.
+  const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const [list, settings] = await Promise.all([getOutstanding(), getSettings()]);
       setRows(list);
       setPaymentDetails(settings.payment_details);
+      writeCache<CachedPay>(CACHE_KEY, { rows: list, paymentDetails: settings.payment_details });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'โหลดรายชื่อค้างชำระไม่สำเร็จ');
-      setRows([]);
     } finally {
       setLoading(false);
     }

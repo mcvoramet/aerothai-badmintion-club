@@ -43,20 +43,30 @@ async function get(action, params = {}) {
   return json.data;
 }
 
+const monthRange = () => {
+  const now = new Date();
+  return {
+    start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
+    end: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
+  };
+};
+
 const checks = [
+  // The frontend calls this on every open — if it fails, the app is broken.
+  [
+    'bootstrap',
+    async () => {
+      const d = await get('bootstrap', monthRange());
+      if (!d || !d.settings || !Array.isArray(d.players) || !Array.isArray(d.games)) {
+        throw new Error('รูปแบบข้อมูลไม่ถูกต้อง — ยัง deploy Apps Script เวอร์ชันใหม่ไม่สำเร็จ?');
+      }
+      return `ผู้เล่น ${d.players.length} คน, เกมเดือนนี้ ${d.games.length} เกม, ลูกละ ${d.settings.price_per_shuttle} บ.`;
+    },
+  ],
   ['getSettings', () => get('getSettings')],
   ['getPlayers', () => get('getPlayers')],
   ['getOutstanding', () => get('getOutstanding')],
-  [
-    'getGamesInRange',
-    () => {
-      const now = new Date();
-      return get('getGamesInRange', {
-        start: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(),
-        end: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
-      });
-    },
-  ],
+  ['getGamesInRange', () => get('getGamesInRange', monthRange())],
 ];
 
 let failed = 0;
@@ -65,7 +75,12 @@ console.log(`ทดสอบ: ${BASE}\n`);
 for (const [name, run] of checks) {
   try {
     const data = await run();
-    const detail = Array.isArray(data) ? `${data.length} รายการ` : JSON.stringify(data).slice(0, 90);
+    const detail =
+      typeof data === 'string'
+        ? data
+        : Array.isArray(data)
+          ? `${data.length} รายการ`
+          : JSON.stringify(data).slice(0, 90);
     console.log(`✓ ${name.padEnd(16)} ${detail}`);
   } catch (err) {
     failed++;

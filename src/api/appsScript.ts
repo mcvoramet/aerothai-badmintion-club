@@ -1,4 +1,5 @@
 import type {
+  BootstrapData,
   Game,
   GamePayload,
   OutstandingPlayer,
@@ -54,6 +55,11 @@ async function apiPost<T>(action: string, body: object = {}): Promise<T> {
     body: JSON.stringify({ action, ...body }),
   });
   return unwrap<T>(res);
+}
+
+/** Settings + players + the month's games in one round trip. */
+export function bootstrap(start: string, end: string): Promise<BootstrapData> {
+  return apiGet<BootstrapData>('bootstrap', { start, end });
 }
 
 export function getPlayers(): Promise<Player[]> {

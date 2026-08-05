@@ -3,7 +3,6 @@ import TabBar, { type TabKey } from './components/TabBar';
 import CalendarView from './components/CalendarView';
 import SearchAndPayView from './components/SearchAndPayView';
 import SettingsView from './components/SettingsView';
-import { usePlayers } from './hooks/usePlayers';
 
 const TITLES: Record<TabKey, string> = {
   log: 'บันทึกเกม',
@@ -13,7 +12,6 @@ const TITLES: Record<TabKey, string> = {
 
 export default function App() {
   const [tab, setTab] = useState<TabKey>('log');
-  const players = usePlayers();
 
   return (
     <div className="app-shell">
@@ -24,12 +22,7 @@ export default function App() {
 
       {tab === 'log' && (
         <div className="view">
-          <CalendarView
-            players={players.players}
-            onPlayersChanged={() => {
-              void players.refresh();
-            }}
-          />
+          <CalendarView />
         </div>
       )}
 

@@ -53,6 +53,13 @@ export interface Settings {
   updated_at: string | null;
 }
 
+/** Everything the calendar screen needs, fetched in one request. */
+export interface BootstrapData {
+  settings: Settings;
+  players: Player[];
+  games: Game[];
+}
+
 export interface PlayerInput {
   nickname: string;
   department: string;

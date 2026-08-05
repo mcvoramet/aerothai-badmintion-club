@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { deleteGame, getGamesInRange } from '../api/appsScript';
+import { useMemo, useState } from 'react';
+import { deleteGame } from '../api/appsScript';
+import { useBootstrap } from '../hooks/useBootstrap';
 import GameSheet from './GameSheet';
 import DayHistorySheet from './DayHistorySheet';
-import type { Game, Player } from '../types';
+import type { BootstrapData, Game, Player } from '../types';
 
 const WEEKDAYS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 const MONTHS = [
@@ -27,42 +28,53 @@ function localDateKey(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
-interface Props {
-  players: Player[];
-  onPlayersChanged: () => void;
+// Adds any players seen on a freshly saved game to the local list, so the
+// autocomplete knows about them without waiting for another round trip.
+function mergePlayers(existing: Player[], game: Game): Player[] {
+  const known = new Set(existing.map((p) => p.player_key));
+  const added = game.players
+    .filter((p) => p.player_key && !known.has(p.player_key))
+    .map((p) => ({
+      player_key: p.player_key,
+      nickname: p.nickname,
+      department: p.department,
+      first_seen: game.timestamp,
+      last_seen: game.timestamp,
+      games_count: 1,
+    }));
+  return added.length ? [...added, ...existing] : existing;
 }
 
-export default function CalendarView({ players, onPlayersChanged }: Props) {
+export default function CalendarView() {
   const todayKey = localDateKey(new Date());
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const [games, setGames] = useState<Game[]>([]);
+  const { data, refreshing, error, update } = useBootstrap(month);
   const [historyDay, setHistoryDay] = useState<string | null>(null);
   const [form, setForm] = useState<{ date: string; editing: Game | null } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [mutationError, setMutationError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const start = new Date(month.getFullYear(), month.getMonth(), 1);
-    const end = new Date(month.getFullYear(), month.getMonth() + 1, 1);
-    try {
-      setGames(await getGamesInRange(start.toISOString(), end.toISOString()));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'โหลดปฏิทินไม่สำเร็จ');
-      setGames([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [month]);
+  const games = useMemo(() => data?.games ?? [], [data]);
+  const players = data?.players ?? [];
+  const pricePerShuttle = data?.settings.price_per_shuttle ?? null;
+  const loading = !data && refreshing;
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Does this game still belong to the month on screen? Editing a game's date
+  // can move it out of view entirely.
+  const inMonth = (game: Game) => {
+    const t = new Date(game.timestamp);
+    return t.getFullYear() === month.getFullYear() && t.getMonth() === month.getMonth();
+  };
+
+  const applySaved = (saved: Game) => (current: BootstrapData): BootstrapData => {
+    const others = current.games.filter((g) => g.game_id !== saved.game_id);
+    const games = inMonth(saved) ? [...others, saved] : others;
+    games.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+    return { ...current, games, players: mergePlayers(current.players, saved) };
+  };
 
   const gamesByDay = useMemo(() => {
     const map = new Map<string, Game[]>();
@@ -96,21 +108,27 @@ export default function CalendarView({ players, onPlayersChanged }: Props) {
     setMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
   }
 
-  async function handleSaved() {
+  // The write already returned the saved row, so merge it in rather than
+  // re-reading the whole month — that refetch used to cost ~2 extra seconds.
+  function handleSaved(saved: Game) {
     setForm(null);
-    await load();
-    onPlayersChanged();
+    setMutationError(null);
+    update(applySaved(saved));
   }
 
   async function handleDelete(game: Game) {
     if (!window.confirm(`ลบเกมนี้ใช่หรือไม่? (${game.players.map((p) => p.nickname).join(', ')})`))
       return;
     setDeletingId(game.game_id);
+    setMutationError(null);
     try {
       await deleteGame(game.game_id);
-      await load();
+      update((current) => ({
+        ...current,
+        games: current.games.filter((g) => g.game_id !== game.game_id),
+      }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'ลบเกมไม่สำเร็จ');
+      setMutationError(err instanceof Error ? err.message : 'ลบเกมไม่สำเร็จ');
     } finally {
       setDeletingId(null);
     }
@@ -141,7 +159,9 @@ export default function CalendarView({ players, onPlayersChanged }: Props) {
           </button>
         </div>
 
-        {error && <div className="error-banner">{error}</div>}
+        {(error || mutationError) && (
+          <div className="error-banner">{mutationError ?? error}</div>
+        )}
 
         <div className="calendar-grid">
           {WEEKDAYS.map((w) => (
@@ -187,6 +207,7 @@ export default function CalendarView({ players, onPlayersChanged }: Props) {
           <span>
             <i className="legend-games" /> มีเกม (ตัวเลข = จำนวนเกม) · แตะเพื่อดูประวัติ
           </span>
+          {refreshing && data && <span className="calendar-refreshing">กำลังอัปเดต…</span>}
         </div>
 
         <button
@@ -236,6 +257,7 @@ export default function CalendarView({ players, onPlayersChanged }: Props) {
           initialDate={form.date}
           editingGame={form.editing}
           players={players}
+          pricePerShuttle={pricePerShuttle}
           onClose={() => setForm(null)}
           onSaved={handleSaved}
         />

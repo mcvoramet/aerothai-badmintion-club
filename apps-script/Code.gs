@@ -20,6 +20,9 @@ function handleRequest_(e, method) {
 
     var result;
     switch (action) {
+      case 'bootstrap':
+        result = bootstrap(payload);
+        break;
       case 'getPlayers':
         result = getPlayers();
         break;
@@ -63,6 +66,21 @@ function handleRequest_(e, method) {
   } catch (err) {
     return jsonOut({ ok: false, error: err.message });
   }
+}
+
+// Everything the main screen needs, in a single request.
+//
+// Each Apps Script call costs ~1s of fixed platform overhead (redirect +
+// possible cold start) no matter how little work it does, so the number of
+// round trips matters far more than the size of any one response. Folding
+// settings + players + the visible month's games into one call is worth more
+// than optimising any of them individually.
+function bootstrap(payload) {
+  return {
+    settings: getSettings(),
+    players: getPlayers(),
+    games: getGamesInRange(payload),
+  };
 }
 
 // One-time convenience setup: run this manually from the Apps Script editor

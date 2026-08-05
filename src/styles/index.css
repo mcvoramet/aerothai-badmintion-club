@@ -521,6 +521,12 @@ select {
   margin-top: 1rem;
 }
 
+/* Shown while cached data is on screen and a refresh is in flight. */
+.calendar-refreshing {
+  color: var(--color-primary-bright);
+  font-weight: 600;
+}
+
 .calendar-month-summary h2 {
   margin-bottom: 0.75rem;
 }
