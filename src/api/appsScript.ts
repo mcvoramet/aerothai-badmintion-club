@@ -2,7 +2,9 @@ import type {
   BootstrapData,
   Game,
   GamePayload,
+  LineStatus,
   OutstandingPlayer,
+  PaymentConfirmation,
   Player,
   PlayerBalance,
   Settings,
@@ -113,4 +115,34 @@ export function updateSettings(patch: {
   payment_details?: string;
 }): Promise<Settings> {
   return apiPost<Settings>('updateSettings', patch);
+}
+
+export function getLineStatus(): Promise<LineStatus> {
+  return apiGet<LineStatus>('getLineStatus');
+}
+
+/**
+ * Settles the player and announces it in the LINE group with their slip.
+ * The settlement is committed first, so `announced: false` means the payment
+ * was recorded but the group message failed — never that the payment was lost.
+ */
+export function confirmPaymentWithSlip(payload: {
+  playerKey: string;
+  slipBase64: string;
+  slipMimeType: string;
+}): Promise<PaymentConfirmation> {
+  return apiPost<PaymentConfirmation>('confirmPaymentWithSlip', {
+    player_key: payload.playerKey,
+    slip_base64: payload.slipBase64,
+    slip_mime_type: payload.slipMimeType,
+  });
+}
+
+/**
+ * Posts the current outstanding list into the linked LINE group as a Flex
+ * Message. Password-gated server-side: unlike settlePlayer this is
+ * outward-facing, so a leaked /exec URL shouldn't let anyone spam the group.
+ */
+export function pushOutstandingToLine(password: string): Promise<{ sent: number }> {
+  return apiPost<{ sent: number }>('pushOutstandingToLine', { password });
 }

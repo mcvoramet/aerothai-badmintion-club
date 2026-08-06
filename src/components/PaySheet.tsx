@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getPlayerBalance, settlePlayer } from '../api/appsScript';
+import { confirmPaymentWithSlip, getPlayerBalance } from '../api/appsScript';
 import type { OutstandingPlayer, PlayerBalance } from '../types';
 
 interface Props {
@@ -9,6 +9,14 @@ interface Props {
   onPaid: () => void;
 }
 
+interface Slip {
+  dataUrl: string;
+  base64: string;
+  mimeType: string;
+}
+
+const SLIP_MAX_EDGE = 1280;
+
 function thaiDate(iso: string) {
   return new Date(iso).toLocaleDateString('th-TH', {
     day: 'numeric',
@@ -17,11 +25,32 @@ function thaiDate(iso: string) {
   });
 }
 
+// Phone cameras produce 4–12MP files. Downscaling before upload keeps the
+// base64 payload small enough that the Apps Script round trip stays quick, and
+// a 1280px slip is still comfortably readable in LINE.
+async function prepareSlip(file: File): Promise<Slip> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, SLIP_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('อ่านไฟล์รูปไม่สำเร็จ');
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+  return { dataUrl, base64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/jpeg' };
+}
+
 export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Props) {
   const [detail, setDetail] = useState<PlayerBalance | null>(null);
   const [loading, setLoading] = useState(true);
   const [settling, setSettling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [slip, setSlip] = useState<Slip | null>(null);
+  const [preparingSlip, setPreparingSlip] = useState(false);
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -55,20 +84,39 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
     };
   }, [player.player_key]);
 
+  async function handleSlipChange(file: File | undefined) {
+    if (!file) return;
+    setPreparingSlip(true);
+    setError(null);
+    try {
+      setSlip(await prepareSlip(file));
+    } catch {
+      setError('อ่านไฟล์รูปไม่สำเร็จ กรุณาเลือกรูปภาพอื่น');
+    } finally {
+      setPreparingSlip(false);
+    }
+  }
+
   async function handleConfirm() {
-    if (!detail) return;
+    if (!detail || !slip) return;
     if (
       !window.confirm(
         `ยืนยันว่า ${detail.nickname} (${detail.department}) ชำระเงิน ${detail.balance.toFixed(
           2
-        )} บาท แล้ว?`
+        )} บาท แล้ว?\n\nสลิปจะถูกส่งเข้ากลุ่ม LINE`
       )
     )
       return;
     setSettling(true);
     setError(null);
     try {
-      await settlePlayer(player.player_key);
+      const result = await confirmPaymentWithSlip({
+        playerKey: player.player_key,
+        slipBase64: slip.base64,
+        slipMimeType: slip.mimeType,
+      });
+      // The payment is recorded either way; only the group message can fail.
+      if (result.warning) window.alert(result.warning);
       onPaid();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกการชำระเงินไม่สำเร็จ');
@@ -158,14 +206,42 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
               </div>
             )}
 
-            <div className="pay-note">
-              <span className="pay-note-icon" aria-hidden="true">
-                🧾
-              </span>
-              <span>
-                โปรดส่งสลิปหลักฐานการโอนเงินในกลุ่ม Line “เก็บตังค์ค่าลูกแบด AEROTHAI”
-                หรือหากไม่อยู่ในกลุ่มโปรดแจ้งคนเล่นใน คอร์ด 1 ได้เลยครับ
-              </span>
+            <div className="pay-slip">
+              <div className="sheet-existing-head">
+                <span>แนบสลิปหลักฐานการโอนเงิน</span>
+              </div>
+
+              {slip ? (
+                <div className="pay-slip-preview">
+                  <img src={slip.dataUrl} alt="สลิปที่แนบ" />
+                  <button
+                    type="button"
+                    className="btn pay-slip-remove"
+                    onClick={() => setSlip(null)}
+                    disabled={settling}
+                  >
+                    เลือกรูปใหม่
+                  </button>
+                </div>
+              ) : (
+                <label className="pay-slip-drop">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => void handleSlipChange(e.target.files?.[0])}
+                    disabled={settling || preparingSlip}
+                  />
+                  <span className="pay-note-icon" aria-hidden="true">
+                    🧾
+                  </span>
+                  <span>{preparingSlip ? 'กำลังเตรียมรูป...' : 'แตะเพื่อถ่ายรูปหรือเลือกสลิป'}</span>
+                </label>
+              )}
+
+              <p className="balance-label" style={{ marginTop: '0.6rem' }}>
+                เมื่อกดยืนยัน บอทจะโพสต์ “ยืนยันชำระแล้ว” พร้อมสลิปนี้เข้ากลุ่ม LINE
+                ระบบไม่ได้เก็บไฟล์สลิปไว้
+              </p>
             </div>
 
             <div className="sheet-actions">
@@ -176,7 +252,7 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
                 type="button"
                 className="sheet-btn-save"
                 onClick={handleConfirm}
-                disabled={settling || detail.balance <= 0}
+                disabled={settling || preparingSlip || !slip || detail.balance <= 0}
               >
                 {settling ? 'กำลังบันทึก...' : 'ยืนยันว่าชำระแล้ว'}
               </button>

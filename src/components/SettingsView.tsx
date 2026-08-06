@@ -1,20 +1,29 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { getSettings, updateSettings, verifyPassword } from '../api/appsScript';
+import {
+  getLineStatus,
+  getSettings,
+  pushOutstandingToLine,
+  updateSettings,
+  verifyPassword,
+} from '../api/appsScript';
+import type { LineStatus } from '../types';
 
+// Holds the verified password for the session, not just an "unlocked" flag:
+// pushing to the LINE group is checked server-side, so the value has to survive
+// past the gate. It's the same string the client typed and already POSTed to
+// verifyPassword.
 const UNLOCK_KEY = 'aerothai-settings-unlocked';
 
 export default function SettingsView() {
-  const [unlocked, setUnlocked] = useState(
-    () => sessionStorage.getItem(UNLOCK_KEY) === '1'
-  );
+  const [password, setPassword] = useState(() => sessionStorage.getItem(UNLOCK_KEY));
 
-  if (!unlocked) {
-    return <PasswordGate onUnlock={() => setUnlocked(true)} />;
+  if (password === null) {
+    return <PasswordGate onUnlock={setPassword} />;
   }
-  return <SettingsForm onLock={() => setUnlocked(false)} />;
+  return <SettingsForm password={password} onLock={() => setPassword(null)} />;
 }
 
-function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
+function PasswordGate({ onUnlock }: { onUnlock: (password: string) => void }) {
   const [password, setPassword] = useState('');
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,8 +34,8 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
     setError(null);
     try {
       await verifyPassword(password);
-      sessionStorage.setItem(UNLOCK_KEY, '1');
-      onUnlock();
+      sessionStorage.setItem(UNLOCK_KEY, password);
+      onUnlock(password);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'รหัสผ่านไม่ถูกต้อง');
     } finally {
@@ -70,7 +79,7 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   );
 }
 
-function SettingsForm({ onLock }: { onLock: () => void }) {
+function SettingsForm({ password, onLock }: { password: string; onLock: () => void }) {
   const [price, setPrice] = useState('');
   const [payment, setPayment] = useState('');
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -233,9 +242,116 @@ function SettingsForm({ onLock }: { onLock: () => void }) {
         </button>
       </div>
 
+      <LineNotifyCard password={password} />
+
       <button type="button" className="btn btn-block" onClick={lock}>
         🔒 ล็อกหน้าตั้งค่า
       </button>
     </>
+  );
+}
+
+function LineNotifyCard({ password }: { password: string }) {
+  const [status, setStatus] = useState<LineStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sent, setSent] = useState<number | null>(null);
+
+  useEffect(() => {
+    void loadStatus();
+  }, []);
+
+  async function loadStatus() {
+    setLoading(true);
+    try {
+      setStatus(await getLineStatus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'อ่านสถานะ LINE ไม่สำเร็จ');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function send() {
+    // Posts publicly into the club's group chat — worth a second tap.
+    if (!window.confirm('ส่งรายชื่อคนค้างชำระเข้ากลุ่ม LINE เลยไหม?')) return;
+    setSending(true);
+    setError(null);
+    setSent(null);
+    try {
+      const result = await pushOutstandingToLine(password);
+      setSent(result.sent);
+      setStatus(await getLineStatus());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'ส่งเข้ากลุ่ม LINE ไม่สำเร็จ');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const ready = status?.configured && status?.linked;
+
+  return (
+    <div className="card">
+      <h2>📣 แจ้งเตือนกลุ่ม LINE</h2>
+      <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
+        ส่งรายชื่อคนค้างชำระ 10 อันดับแรกเข้ากลุ่ม LINE โดยแต่ละคนมีปุ่ม "ชำระเงิน" ที่กดแล้วเปิดแอป
+        พร้อมหน้าจ่ายเงินของคนนั้นให้เลย
+      </p>
+
+      {status?.trigger_words?.length ? (
+        <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
+          หรือพิมพ์{' '}
+          {status.trigger_words.map((word, i) => (
+            <span key={word}>
+              {i > 0 && ' หรือ '}
+              <code className="line-trigger">{word}</code>
+            </span>
+          ))}{' '}
+          ในกลุ่ม LINE บอทก็จะส่งรายการให้ทันที
+        </p>
+      ) : null}
+
+      {loading ? (
+        <p className="balance-label">กำลังตรวจสอบสถานะ...</p>
+      ) : (
+        <p className={`line-status ${ready ? 'is-ready' : 'is-pending'}`}>
+          {!status?.configured
+            ? '⚠️ ยังไม่ได้ตั้งค่า — ใส่ LINE_CHANNEL_ACCESS_TOKEN และ LINE_WEBHOOK_TOKEN ใน Script Properties'
+            : !status?.linked
+              ? '⚠️ ยังไม่ได้เชื่อมกลุ่ม — เพิ่มบอทเข้ากลุ่มแล้วพิมพ์อะไรก็ได้ 1 ครั้ง'
+              : '✅ พร้อมส่ง'}
+        </p>
+      )}
+
+      {error && (
+        <div className="error-banner" style={{ marginTop: '0.75rem' }}>
+          {error}
+        </div>
+      )}
+
+      {sent !== null && (
+        <div className="success-banner" style={{ marginTop: '0.75rem' }}>
+          {sent > 0 ? `ส่งรายชื่อค้างชำระ ${sent} คนเข้ากลุ่มแล้ว` : 'ส่งแล้ว — ตอนนี้ไม่มีใครค้างชำระ'}
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="btn btn-primary btn-block"
+        onClick={send}
+        disabled={sending || loading || !ready}
+        style={{ marginTop: '0.75rem' }}
+      >
+        {sending ? 'กำลังส่ง...' : 'ส่งรายชื่อค้างชำระเข้ากลุ่ม LINE'}
+      </button>
+
+      {status?.last_pushed_at && (
+        <p className="balance-label" style={{ marginTop: '0.75rem' }}>
+          ส่งล่าสุด: {new Date(status.last_pushed_at).toLocaleString('th-TH')}
+        </p>
+      )}
+    </div>
   );
 }

@@ -53,6 +53,28 @@ export interface Settings {
   updated_at: string | null;
 }
 
+export interface LineStatus {
+  /** Channel access token + webhook secret are both set in Script Properties. */
+  configured: boolean;
+  /** The bot has seen at least one event, so it knows which chat to push to. */
+  linked: boolean;
+  /** LINE_LIFF_URL is set, so the bubble can deep-link into the pay screen. */
+  app_url_set: boolean;
+  /** Typing any of these in the chat makes the bot post the list. */
+  trigger_words: string[];
+  last_pushed_at: string | null;
+}
+
+export interface PaymentConfirmation {
+  player_key: string;
+  amount_settled: number;
+  new_balance: 0;
+  settlement_id: string;
+  /** False when the payment was recorded but the LINE announcement failed. */
+  announced: boolean;
+  warning: string | null;
+}
+
 /** Everything the calendar screen needs, fetched in one request. */
 export interface BootstrapData {
   settings: Settings;

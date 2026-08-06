@@ -325,6 +325,34 @@ select {
   font-size: 0.9rem;
 }
 
+.line-status {
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.line-status.is-ready {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.line-trigger {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  background: var(--color-accent-soft);
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  font-family: inherit;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.line-status.is-pending {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
 .tab-bar {
   position: fixed;
   bottom: 0;
@@ -1002,6 +1030,55 @@ select {
   font-size: 1rem;
   line-height: 1.4;
   flex-shrink: 0;
+}
+
+.pay-slip {
+  margin-bottom: 1rem;
+}
+
+.pay-slip-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+  padding: 1.4rem 1rem;
+  background: var(--color-surface-sunken);
+  border: 1.5px dashed var(--color-primary-bright);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  color: var(--color-text);
+  text-align: center;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.pay-slip-drop:active {
+  background: var(--color-accent-soft);
+}
+
+.pay-slip-drop input {
+  display: none;
+}
+
+.pay-slip-preview {
+  margin-top: 0.4rem;
+}
+
+.pay-slip-preview img {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+  background: var(--color-surface-sunken);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.pay-slip-remove {
+  width: 100%;
+  margin-top: 0.5rem;
 }
 
 .pay-account-text {
