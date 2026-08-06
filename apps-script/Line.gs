@@ -310,18 +310,28 @@ function pushOutstandingToLine(payload) {
 // the source of truth and the announcement is only a courtesy — if LINE is down
 // the payment must still be recorded. A failed announcement comes back as a
 // warning rather than an error so the user isn't told to pay twice.
-function confirmPaymentWithSlip(payload) {
+//
+// Cash needs no slip: there is nothing to photograph when money changes hands
+// at the court, so the group just gets the text with a cash marker.
+function confirmPayment(payload) {
   if (!payload || !payload.player_key) throw new Error('ต้องระบุ player_key');
-  if (!payload.slip_base64) throw new Error('กรุณาแนบสลิปหลักฐานการโอนเงิน');
+  var isCash = payload.method === 'cash';
+  if (!isCash && !payload.slip_base64) throw new Error('กรุณาแนบสลิปหลักฐานการโอนเงิน');
 
   var player = findPlayerByKey_(payload.player_key);
-  var result = settlePlayer({ player_key: payload.player_key, source: 'app' });
+  var result = settlePlayer({
+    player_key: payload.player_key,
+    source: 'app',
+    method: isCash ? 'cash' : 'transfer',
+  });
 
   var warning = null;
   var slip = null;
   try {
-    slip = uploadSlip_(payload.slip_base64, payload.slip_mime_type, player.nickname);
-    announcePayment_(player, result.amount_settled, slip.url);
+    if (!isCash) {
+      slip = uploadSlip_(payload.slip_base64, payload.slip_mime_type, player.nickname);
+    }
+    announcePayment_(player, result.amount_settled, slip ? slip.url : null, isCash);
   } catch (err) {
     // Don't leave the slip behind if it never made it into the chat.
     if (slip) {
@@ -353,7 +363,7 @@ function confirmPaymentWithSlip(payload) {
 // Called after settlePlayer has committed, so getOutstanding() here reflects the
 // payment — that's what makes the list drop them. LINE messages can't be edited,
 // so re-posting the list is the only way to keep the chat current.
-function announcePayment_(player, amount, slipUrl) {
+function announcePayment_(player, amount, slipUrl, isCash) {
   var messages = [
     {
       type: 'text',
@@ -361,7 +371,8 @@ function announcePayment_(player, amount, slipUrl) {
         player.nickname +
         (player.department ? ' · ' + player.department : '') +
         ' ยืนยันชำระเงิน ✅\nจำนวน ฿' +
-        formatAmount_(amount),
+        formatAmount_(amount) +
+        (isCash ? '\nชำระด้วยเงินสด 💵' : ''),
     },
   ];
   if (slipUrl) {

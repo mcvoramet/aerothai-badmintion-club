@@ -73,8 +73,11 @@ function handleRequest_(e, method) {
       case 'pushOutstandingToLine':
         result = pushOutstandingToLine(payload);
         break;
+      // confirmPaymentWithSlip is the old name, kept so a browser holding a
+      // cached bundle keeps working if the frontend deploys before this does.
+      case 'confirmPayment':
       case 'confirmPaymentWithSlip':
-        result = confirmPaymentWithSlip(payload);
+        result = confirmPayment(payload);
         break;
       default:
         throw new Error('ไม่รู้จักคำสั่ง: ' + action);
@@ -145,12 +148,17 @@ function setupSheets() {
     'timestamp',
     'source',
     'line_user_id',
+    'method',
   ]);
   createSheetIfMissing_(ss, SHEET_NAMES.SETTINGS, ['key', 'value', 'updated_at']);
 
   // Sheets that predate the LINE feature already exist, so createSheetIfMissing_
   // leaves their headers alone. Append the audit columns to them here.
-  addColumnsIfMissing_(ss.getSheetByName(SHEET_NAMES.SETTLEMENTS), ['source', 'line_user_id']);
+  addColumnsIfMissing_(ss.getSheetByName(SHEET_NAMES.SETTLEMENTS), [
+    'source',
+    'line_user_id',
+    'method',
+  ]);
 
   var settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
   var rows = readSheetAsObjects(settingsSheet);

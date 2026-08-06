@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { confirmPaymentWithSlip, getPlayerBalance } from '../api/appsScript';
-import type { OutstandingPlayer, PlayerBalance } from '../types';
+import { confirmPayment, getPlayerBalance } from '../api/appsScript';
+import type { OutstandingPlayer, PaymentMethod, PlayerBalance } from '../types';
 
 interface Props {
   player: OutstandingPlayer;
@@ -51,6 +51,7 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
   const [error, setError] = useState<string | null>(null);
   const [slip, setSlip] = useState<Slip | null>(null);
   const [preparingSlip, setPreparingSlip] = useState(false);
+  const [method, setMethod] = useState<PaymentMethod>('transfer');
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -97,23 +98,28 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
     }
   }
 
+  const isCash = method === 'cash';
+
   async function handleConfirm() {
-    if (!detail || !slip) return;
+    if (!detail || (!isCash && !slip)) return;
     if (
       !window.confirm(
         `ยืนยันว่า ${detail.nickname} (${detail.department}) ชำระเงิน ${detail.balance.toFixed(
           2
-        )} บาท แล้ว?\n\nสลิปจะถูกส่งเข้ากลุ่ม LINE`
+        )} บาท แล้ว?\n\n${
+          isCash ? 'จะแจ้งเข้ากลุ่ม LINE ว่าชำระด้วยเงินสด' : 'สลิปจะถูกส่งเข้ากลุ่ม LINE'
+        }`
       )
     )
       return;
     setSettling(true);
     setError(null);
     try {
-      const result = await confirmPaymentWithSlip({
+      const result = await confirmPayment({
         playerKey: player.player_key,
-        slipBase64: slip.base64,
-        slipMimeType: slip.mimeType,
+        method,
+        slipBase64: isCash ? undefined : slip?.base64,
+        slipMimeType: isCash ? undefined : slip?.mimeType,
       });
       // The payment is recorded either way; only the group message can fail.
       if (result.warning) window.alert(result.warning);
@@ -208,40 +214,75 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
 
             <div className="pay-slip">
               <div className="sheet-existing-head">
-                <span>แนบสลิปหลักฐานการโอนเงิน</span>
+                <span>วิธีชำระเงิน</span>
               </div>
 
-              {slip ? (
-                <div className="pay-slip-preview">
-                  <img src={slip.dataUrl} alt="สลิปที่แนบ" />
-                  <button
-                    type="button"
-                    className="btn pay-slip-remove"
-                    onClick={() => setSlip(null)}
-                    disabled={settling}
-                  >
-                    เลือกรูปใหม่
-                  </button>
-                </div>
-              ) : (
-                <label className="pay-slip-drop">
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => void handleSlipChange(e.target.files?.[0])}
-                    disabled={settling || preparingSlip}
-                  />
-                  <span className="pay-note-icon" aria-hidden="true">
-                    🧾
-                  </span>
-                  <span>{preparingSlip ? 'กำลังเตรียมรูป...' : 'แตะเพื่อถ่ายรูปหรือเลือกสลิป'}</span>
-                </label>
-              )}
+              <div className="pay-method" role="radiogroup" aria-label="วิธีชำระเงิน">
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={!isCash}
+                  className={`pay-method-btn${!isCash ? ' is-active' : ''}`}
+                  onClick={() => setMethod('transfer')}
+                  disabled={settling}
+                >
+                  🏦 โอนเงิน
+                </button>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={isCash}
+                  className={`pay-method-btn${isCash ? ' is-active' : ''}`}
+                  onClick={() => setMethod('cash')}
+                  disabled={settling}
+                >
+                  💵 จ่ายเงินสด
+                </button>
+              </div>
 
-              <p className="balance-label" style={{ marginTop: '0.6rem' }}>
-                เมื่อกดยืนยัน บอทจะโพสต์ “ยืนยันชำระแล้ว” พร้อมสลิปนี้เข้ากลุ่ม LINE
-                ระบบไม่ได้เก็บไฟล์สลิปไว้
-              </p>
+              {isCash ? (
+                <p className="balance-label" style={{ marginTop: '0.7rem' }}>
+                  จ่ายเงินสดไม่ต้องแนบสลิป — บอทจะโพสต์เข้ากลุ่ม LINE ว่า “ชำระด้วยเงินสด 💵”
+                </p>
+              ) : (
+                <>
+                  <div className="sheet-existing-head" style={{ marginTop: '0.9rem' }}>
+                    <span>แนบสลิปหลักฐานการโอนเงิน</span>
+                  </div>
+                  {slip ? (
+                    <div className="pay-slip-preview">
+                      <img src={slip.dataUrl} alt="สลิปที่แนบ" />
+                      <button
+                        type="button"
+                        className="btn pay-slip-remove"
+                        onClick={() => setSlip(null)}
+                        disabled={settling}
+                      >
+                        เลือกรูปใหม่
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="pay-slip-drop">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => void handleSlipChange(e.target.files?.[0])}
+                        disabled={settling || preparingSlip}
+                      />
+                      <span className="pay-note-icon" aria-hidden="true">
+                        🧾
+                      </span>
+                      <span>
+                        {preparingSlip ? 'กำลังเตรียมรูป...' : 'แตะเพื่อถ่ายรูปหรือเลือกสลิป'}
+                      </span>
+                    </label>
+                  )}
+                  <p className="balance-label" style={{ marginTop: '0.6rem' }}>
+                    เมื่อกดยืนยัน บอทจะโพสต์ “ยืนยันชำระแล้ว” พร้อมสลิปนี้เข้ากลุ่ม LINE
+                    ระบบไม่ได้เก็บไฟล์สลิปไว้
+                  </p>
+                </>
+              )}
             </div>
 
             <div className="sheet-actions">
@@ -252,7 +293,7 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
                 type="button"
                 className="sheet-btn-save"
                 onClick={handleConfirm}
-                disabled={settling || preparingSlip || !slip || detail.balance <= 0}
+                disabled={settling || preparingSlip || (!isCash && !slip) || detail.balance <= 0}
               >
                 {settling ? 'กำลังบันทึก...' : 'ยืนยันว่าชำระแล้ว'}
               </button>

@@ -190,6 +190,7 @@ function settlePlayer(payload) {
       timestamp: ts,
       source: payload.source === 'line' ? 'line' : 'app',
       line_user_id: payload.line_user_id ? String(payload.line_user_id) : '',
+      method: payload.method === 'cash' ? 'cash' : 'transfer',
     });
     return {
       player_key: player.player_key,

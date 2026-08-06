@@ -5,6 +5,7 @@ import type {
   LineStatus,
   OutstandingPlayer,
   PaymentConfirmation,
+  PaymentMethod,
   Player,
   PlayerBalance,
   Settings,
@@ -122,19 +123,24 @@ export function getLineStatus(): Promise<LineStatus> {
 }
 
 /**
- * Settles the player and announces it in the LINE group with their slip.
- * The settlement is committed first, so `announced: false` means the payment
- * was recorded but the group message failed — never that the payment was lost.
+ * Settles the player and announces it in the LINE group.
+ *
+ * A transfer must carry a slip; cash carries none, since there is nothing to
+ * photograph when money changes hands at the court. The settlement is committed
+ * first, so `announced: false` means the payment was recorded but the group
+ * message failed — never that the payment was lost.
  */
-export function confirmPaymentWithSlip(payload: {
+export function confirmPayment(payload: {
   playerKey: string;
-  slipBase64: string;
-  slipMimeType: string;
+  method: PaymentMethod;
+  slipBase64?: string;
+  slipMimeType?: string;
 }): Promise<PaymentConfirmation> {
-  return apiPost<PaymentConfirmation>('confirmPaymentWithSlip', {
+  return apiPost<PaymentConfirmation>('confirmPayment', {
     player_key: payload.playerKey,
-    slip_base64: payload.slipBase64,
-    slip_mime_type: payload.slipMimeType,
+    method: payload.method,
+    slip_base64: payload.slipBase64 ?? '',
+    slip_mime_type: payload.slipMimeType ?? '',
   });
 }
 

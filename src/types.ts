@@ -65,6 +65,9 @@ export interface LineStatus {
   last_pushed_at: string | null;
 }
 
+/** 'cash' skips the slip — there's nothing to photograph at the court. */
+export type PaymentMethod = 'transfer' | 'cash';
+
 export interface PaymentConfirmation {
   player_key: string;
   amount_settled: number;

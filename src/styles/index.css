@@ -1036,6 +1036,37 @@ select {
   margin-bottom: 1rem;
 }
 
+.pay-method {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.pay-method-btn {
+  flex: 1;
+  padding: 0.65rem 0.5rem;
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.pay-method-btn.is-active {
+  background: var(--color-accent-soft);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.pay-method-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .pay-slip-drop {
   display: flex;
   flex-direction: column;
