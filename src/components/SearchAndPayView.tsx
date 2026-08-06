@@ -13,7 +13,14 @@ interface CachedPay {
 
 export default function SearchAndPayView({ initialPlayerKey }: { initialPlayerKey?: string | null }) {
   const cached = useMemo(() => readCache<CachedPay>(CACHE_KEY), []);
-  const [query, setQuery] = useState('');
+  // player_key is `nickname|department`, so the name is already in the URL and
+  // needs no round trip. Filling the box on the first render matters: waiting
+  // for the fetch left the field blank for a second or two, long enough for
+  // someone to assume the link failed and start typing over it.
+  const linkedNickname = initialPlayerKey ? initialPlayerKey.split('|')[0] : '';
+  const [query, setQuery] = useState(linkedNickname);
+  // Once they touch the box it's theirs; never overwrite it afterwards.
+  const [queryTouched, setQueryTouched] = useState(false);
   const [rows, setRows] = useState<OutstandingPlayer[]>(cached?.rows ?? []);
   const [paymentDetails, setPaymentDetails] = useState(cached?.paymentDetails ?? '');
   const [selected, setSelected] = useState<OutstandingPlayer | null>(null);
@@ -45,23 +52,20 @@ export default function SearchAndPayView({ initialPlayerKey }: { initialPlayerKe
     void load();
   }, [load]);
 
-  // A LINE link drops the person's nickname into the search box rather than
-  // opening their pay sheet outright, so they land on the normal search screen
-  // with the list already narrowed to themselves and confirm from there.
-  //
-  // Runs against fresh rows rather than the cache so a stale bubble can't
-  // pre-fill a search for someone who has already paid; in that case the query
-  // is left empty so the full list stays visible behind the notice.
+  // The box is already filled from the URL; this only catches the stale case,
+  // which genuinely does need live data. If that person has since paid, drop
+  // the query so the full list is visible behind the notice instead of a search
+  // that matches nothing — unless they've started typing, in which case leave
+  // whatever they wrote alone.
   useEffect(() => {
     if (deepLinkDone || !loadedOnce || !initialPlayerKey) return;
     const match = rows.find((r) => r.player_key === initialPlayerKey);
-    if (match) {
-      setQuery(match.nickname);
-    } else {
+    if (!match) {
+      if (!queryTouched) setQuery('');
       setDeepLinkMiss(initialPlayerKey.split('|')[0] || initialPlayerKey);
     }
     setDeepLinkDone(true);
-  }, [deepLinkDone, loadedOnce, initialPlayerKey, rows]);
+  }, [deepLinkDone, loadedOnce, initialPlayerKey, rows, queryTouched]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -83,7 +87,10 @@ export default function SearchAndPayView({ initialPlayerKey }: { initialPlayerKe
             type="text"
             placeholder="พิมพ์เพื่อค้นหา หรือเลือกจากรายชื่อด้านล่าง"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setQueryTouched(true);
+            }}
           />
         </div>
 
