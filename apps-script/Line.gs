@@ -218,7 +218,7 @@ function uploadSlip_(base64, mimeType, nickname) {
   };
 }
 
-// Run on a time-driven trigger — see setupSlipCleanupTrigger.
+// Run on a time-driven trigger — see setupSlips.
 function deleteExpiredSlips_() {
   var id = lineProp_(LINE_PROP.SLIP_FOLDER_ID);
   if (!id) return 0;
@@ -242,12 +242,31 @@ function deleteExpiredSlips_() {
   return removed;
 }
 
-// Run once from the editor to schedule the hourly cleanup.
-function setupSlipCleanupTrigger() {
+// Run once from the editor after adding the LINE files.
+//
+// Touching DriveApp here is the point, not a side effect: a web app request can
+// never trigger an authorization prompt, so if Drive hasn't been consented to,
+// the first real payment fails with "คุณไม่ได้รับอนุญาตให้เรียกใช้ DriveApp".
+// Creating the folder from the editor surfaces that prompt while someone is
+// there to click Authorize. deleteExpiredSlips_ is private (trailing
+// underscore) and so can't be selected in the Run dropdown — this is the
+// public entry point that stands in for it.
+function setupSlips() {
+  var folder = slipFolder_();
+
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'deleteExpiredSlips_') ScriptApp.deleteTrigger(t);
   });
   ScriptApp.newTrigger('deleteExpiredSlips_').timeBased().everyHours(1).create();
+
+  var message =
+    'พร้อมใช้งาน — โฟลเดอร์สลิป: "' +
+    folder.getName() +
+    '" (id: ' +
+    folder.getId() +
+    ') และตั้งลบอัตโนมัติทุก 1 ชั่วโมงแล้ว';
+  console.log(message);
+  return message;
 }
 
 // ---------------------------------------------------------------------------
