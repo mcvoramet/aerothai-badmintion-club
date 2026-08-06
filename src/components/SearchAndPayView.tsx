@@ -11,7 +11,7 @@ interface CachedPay {
   paymentDetails: string;
 }
 
-export default function SearchAndPayView() {
+export default function SearchAndPayView({ initialPlayerKey }: { initialPlayerKey?: string | null }) {
   const cached = useMemo(() => readCache<CachedPay>(CACHE_KEY), []);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<OutstandingPlayer[]>(cached?.rows ?? []);
@@ -20,6 +20,11 @@ export default function SearchAndPayView() {
   // Cached data renders immediately; only a cold start shows a spinner.
   const [loading, setLoading] = useState(!cached);
   const [error, setError] = useState<string | null>(null);
+  // Set when a LINE deep link named someone who no longer owes anything.
+  const [deepLinkMiss, setDeepLinkMiss] = useState<string | null>(null);
+  const [deepLinkDone, setDeepLinkDone] = useState(!initialPlayerKey);
+  // Distinct from `loading`, which starts false whenever a cache exists.
+  const [loadedOnce, setLoadedOnce] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -32,12 +37,27 @@ export default function SearchAndPayView() {
       setError(err instanceof Error ? err.message : 'โหลดรายชื่อค้างชำระไม่สำเร็จ');
     } finally {
       setLoading(false);
+      setLoadedOnce(true);
     }
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Open the pay sheet the LINE link asked for, once the live list has arrived.
+  // Runs against fresh rows rather than the cache so a stale bubble can't open a
+  // sheet for someone who has already paid.
+  useEffect(() => {
+    if (deepLinkDone || !loadedOnce || !initialPlayerKey) return;
+    const match = rows.find((r) => r.player_key === initialPlayerKey);
+    if (match) {
+      setSelected(match);
+    } else {
+      setDeepLinkMiss(initialPlayerKey.split('|')[0] || initialPlayerKey);
+    }
+    setDeepLinkDone(true);
+  }, [deepLinkDone, loadedOnce, initialPlayerKey, rows]);
 
   const filtered = useMemo(() => {
     const q = query.trim();
@@ -66,6 +86,11 @@ export default function SearchAndPayView() {
         {error && (
           <div className="error-banner" style={{ marginTop: '0.75rem' }}>
             {error}
+          </div>
+        )}
+        {deepLinkMiss && (
+          <div className="success-banner" style={{ marginTop: '0.75rem' }}>
+            {deepLinkMiss} ไม่มียอดค้างชำระแล้ว (รายการใน LINE อาจเป็นข้อมูลเก่า)
           </div>
         )}
         {loading && <p className="balance-label">กำลังโหลด...</p>}

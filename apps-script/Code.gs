@@ -11,6 +11,14 @@ function handleRequest_(e, method) {
     var action, payload;
     if (method === 'POST') {
       var body = e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
+
+      // LINE webhook deliveries have no `action` — they're { destination, events }.
+      // Answer them before the action switch, and always with 200: a non-200
+      // makes LINE retry, which for a settle postback means paying twice.
+      if (body && body.events) {
+        return jsonOut(handleLineWebhook_(e, body));
+      }
+
       action = body.action;
       payload = body;
     } else {
@@ -58,6 +66,15 @@ function handleRequest_(e, method) {
         break;
       case 'updateSettings':
         result = updateSettings(payload);
+        break;
+      case 'getLineStatus':
+        result = getLineStatus();
+        break;
+      case 'pushOutstandingToLine':
+        result = pushOutstandingToLine(payload);
+        break;
+      case 'confirmPaymentWithSlip':
+        result = confirmPaymentWithSlip(payload);
         break;
       default:
         throw new Error('ไม่รู้จักคำสั่ง: ' + action);
@@ -126,8 +143,14 @@ function setupSheets() {
     'department',
     'amount',
     'timestamp',
+    'source',
+    'line_user_id',
   ]);
   createSheetIfMissing_(ss, SHEET_NAMES.SETTINGS, ['key', 'value', 'updated_at']);
+
+  // Sheets that predate the LINE feature already exist, so createSheetIfMissing_
+  // leaves their headers alone. Append the audit columns to them here.
+  addColumnsIfMissing_(ss.getSheetByName(SHEET_NAMES.SETTLEMENTS), ['source', 'line_user_id']);
 
   var settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
   var rows = readSheetAsObjects(settingsSheet);
@@ -142,6 +165,18 @@ function setupSheets() {
   seedSetting('price_per_shuttle', 10);
   seedSetting('payment_details', 'ธนาคาร: \nเลขที่บัญชี: \nชื่อบัญชี: \nพร้อมเพย์: ');
   seedSetting(SETTINGS_PASSWORD_KEY, DEFAULT_SETTINGS_PASSWORD);
+}
+
+// Additive-only header migration: appendObjectRow maps values by header name,
+// so a sheet gaining a column keeps working for rows written before it existed.
+function addColumnsIfMissing_(sheet, headers) {
+  if (!sheet || sheet.getLastRow() === 0) return;
+  var existing = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var missing = headers.filter(function (h) {
+    return existing.indexOf(h) === -1;
+  });
+  if (!missing.length) return;
+  sheet.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
 }
 
 function createSheetIfMissing_(ss, name, headers) {

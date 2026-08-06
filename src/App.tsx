@@ -10,8 +10,25 @@ const TITLES: Record<TabKey, string> = {
   settings: 'ตั้งค่า',
 };
 
+// The LINE bubble links straight here: ?pay=<player_key> opens that person's pay
+// sheet, ?tab=pay just lands on the list. Read once on mount and then scrub the
+// query string, so a refresh doesn't reopen a sheet the user already dismissed.
+function readDeepLink() {
+  const params = new URLSearchParams(window.location.search);
+  const payKey = params.get('pay');
+  const tab = params.get('tab');
+  if (payKey || tab) {
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+  return {
+    tab: (payKey || tab === 'pay' ? 'pay' : tab === 'settings' ? 'settings' : 'log') as TabKey,
+    payKey,
+  };
+}
+
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('log');
+  const [deepLink] = useState(readDeepLink);
+  const [tab, setTab] = useState<TabKey>(deepLink.tab);
 
   return (
     <div className="app-shell">
@@ -28,7 +45,7 @@ export default function App() {
 
       {tab === 'pay' && (
         <div className="view">
-          <SearchAndPayView />
+          <SearchAndPayView initialPlayerKey={deepLink.payKey} />
         </div>
       )}
 
