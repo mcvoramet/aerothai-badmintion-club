@@ -297,7 +297,7 @@ function LineNotifyCard({ password }: { password: string }) {
       <h2>📣 แจ้งเตือนกลุ่ม LINE</h2>
       <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
         ส่งรายชื่อคนค้างชำระ 10 อันดับแรกเข้ากลุ่ม LINE โดยแต่ละคนมีปุ่ม "ชำระเงิน" ที่กดแล้วเปิดแอป
-        พร้อมหน้าจ่ายเงินของคนนั้นให้เลย
+        หน้าค้นหา พร้อมใส่ชื่อของคนนั้นในช่องค้นหาให้เลย
       </p>
 
       {status?.trigger_words?.length ? (

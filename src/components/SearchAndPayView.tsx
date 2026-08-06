@@ -45,14 +45,18 @@ export default function SearchAndPayView({ initialPlayerKey }: { initialPlayerKe
     void load();
   }, [load]);
 
-  // Open the pay sheet the LINE link asked for, once the live list has arrived.
-  // Runs against fresh rows rather than the cache so a stale bubble can't open a
-  // sheet for someone who has already paid.
+  // A LINE link drops the person's nickname into the search box rather than
+  // opening their pay sheet outright, so they land on the normal search screen
+  // with the list already narrowed to themselves and confirm from there.
+  //
+  // Runs against fresh rows rather than the cache so a stale bubble can't
+  // pre-fill a search for someone who has already paid; in that case the query
+  // is left empty so the full list stays visible behind the notice.
   useEffect(() => {
     if (deepLinkDone || !loadedOnce || !initialPlayerKey) return;
     const match = rows.find((r) => r.player_key === initialPlayerKey);
     if (match) {
-      setSelected(match);
+      setQuery(match.nickname);
     } else {
       setDeepLinkMiss(initialPlayerKey.split('|')[0] || initialPlayerKey);
     }
