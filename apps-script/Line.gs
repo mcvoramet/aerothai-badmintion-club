@@ -4,11 +4,13 @@
 // is a public unauthenticated GET, so anything in that sheet is one bug away
 // from being world-readable.
 //
-// The bot posts three kinds of message:
+// The bot posts four kinds of message:
 //   - the outstanding list, pushed from the web app's Settings tab
 //   - the same list, replied when someone types the trigger word in the chat
 //   - a "ยืนยันชำระแล้ว" announcement with the payer's slip, pushed when
 //     someone confirms a payment in the web app
+//   - an edit/delete notice for a recorded game, showing what changed and what
+//     each player in it now owes
 // Settling always happens in the web app, never in the chat, so the webhook
 // only ever reads messages — it never changes the ledger.
 var LINE_PROP = {
@@ -380,4 +382,82 @@ function announcePayment_(player, amount, slipUrl, isCash) {
   }
   messages.push(buildOutstandingFlex_(getOutstanding(), nowIso()));
   linePush_(lineTargetId_(), messages);
+}
+
+// ---------------------------------------------------------------------------
+// Game edit / delete announcements
+// ---------------------------------------------------------------------------
+
+// A game is only ever visible to the group through what people owe, so editing
+// or deleting one silently moves money around behind their backs. These pushes
+// close that gap: every change to a recorded game is announced with what moved
+// and who it moved for.
+//
+// Best effort by design, like announcePayment_: the sheet is the ledger, and a
+// LINE outage must never stop someone correcting a wrong entry. Returns null on
+// success, or a warning string the web app can show next to the saved game.
+//
+// `after` is null for a delete. Silently does nothing until the bot is set up,
+// so a fresh install isn't nagged about LINE on every edit.
+function notifyGameChange_(kind, before, after) {
+  if (!lineProp_(LINE_PROP.TOKEN) || !lineTargetId_()) return null;
+  try {
+    var affected = affectedPlayers_(before, after);
+    linePush_(lineTargetId_(), [
+      buildGameChangeFlex_(kind, before, after, affected, nowIso()),
+    ]);
+    return null;
+  } catch (err) {
+    var warning =
+      (kind === 'delete' ? 'ลบเกมแล้ว' : 'บันทึกการแก้ไขแล้ว') +
+      ' แต่แจ้งเข้ากลุ่ม LINE ไม่สำเร็จ: ' +
+      (err && err.message ? err.message : err);
+    console.error(warning);
+    return warning;
+  }
+}
+
+// Everyone the change touched: whoever was in the game before, whoever is in it
+// after, or both. `was`/`now` are that person's share of the game on each side,
+// null when they weren't in it — which is what makes an added or removed player
+// readable at a glance.
+//
+// Balances are read after the write has committed, so the number next to each
+// name is what they actually owe now, not what they owed a moment ago.
+function affectedPlayers_(before, after) {
+  var balances = {};
+  getOutstanding().forEach(function (p) {
+    balances[p.player_key] = p.balance;
+  });
+
+  var index = {};
+  var order = [];
+  function slotFor(player) {
+    var entry = index[player.player_key];
+    if (!entry) {
+      entry = {
+        player_key: player.player_key,
+        nickname: player.nickname,
+        department: player.department,
+        was: null,
+        now: null,
+        balance: round2_(balances[player.player_key] || 0),
+      };
+      index[player.player_key] = entry;
+      order.push(entry);
+    }
+    return entry;
+  }
+
+  if (before) {
+    before.players.forEach(function (p) {
+      slotFor(p).was = Number(before.cost_per_player);
+    });
+  }
+  if (after) {
+    after.players.forEach(function (p) {
+      slotFor(p).now = Number(after.cost_per_player);
+    });
+  }
+  return order;
 }

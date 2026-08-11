@@ -24,6 +24,21 @@ export interface Game {
   edited_at: string | null;
 }
 
+/**
+ * A saved edit. Editing a game moves what people owe, so the bot announces it
+ * in the group — `line_warning` is set when the game was saved but that
+ * announcement failed, never when the save itself failed.
+ */
+export interface GameEdit extends Game {
+  line_warning: string | null;
+}
+
+export interface GameDeletion {
+  game_id: string;
+  deleted: true;
+  line_warning: string | null;
+}
+
 export interface PlayerBalance {
   player_key: string;
   nickname: string;

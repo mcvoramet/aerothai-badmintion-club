@@ -143,6 +143,7 @@ function addGame(payload) {
 function editGame(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  var before, after;
   try {
     if (!payload || !payload.game_id) throw new Error('ต้องระบุ game_id');
     var shuttles = validateGamePayload_(payload);
@@ -183,24 +184,44 @@ function editGame(payload) {
       row[slot + '_department'] =
         i < keys.length ? String(payload.players[i].department).trim() : '';
     }
+    // Snapshot the old shape before it's overwritten — the LINE announcement is
+    // a diff, so it needs both sides.
+    before = rowToGame_(existing);
     updateObjectRow(sheet, existing.__row, row);
-    return rowToGame_(row);
+    after = rowToGame_(row);
   } finally {
     lock.releaseLock();
   }
+
+  // Announced outside the lock: a LINE round trip takes seconds, and nobody
+  // else should wait on the chat to save their own game.
+  after.line_warning = notifyGameChange_('edit', before, after);
+  return after;
 }
 
 function deleteGame(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  var before;
   try {
     if (!payload || !payload.game_id) throw new Error('ต้องระบุ game_id');
     var sheet = getSheet(SHEET_NAMES.GAMES);
     var existing = findGameRow_(sheet, payload.game_id);
+    // Deleting stays idempotent, but a second delete must not announce again —
+    // the ledger didn't change, so there is nothing to tell the group.
+    if (isDeleted_(existing.deleted)) {
+      return { game_id: payload.game_id, deleted: true, line_warning: null };
+    }
+    before = rowToGame_(existing);
     var col = headerIndex_(sheet, 'deleted') + 1;
     sheet.getRange(existing.__row, col).setValue(true);
-    return { game_id: payload.game_id, deleted: true };
   } finally {
     lock.releaseLock();
   }
+
+  return {
+    game_id: payload.game_id,
+    deleted: true,
+    line_warning: notifyGameChange_('delete', before, null),
+  };
 }

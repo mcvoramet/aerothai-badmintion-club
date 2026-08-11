@@ -12,7 +12,8 @@ interface Props {
    *  just to render the cost preview. Editing uses the game's frozen price. */
   pricePerShuttle: number | null;
   onClose: () => void;
-  onSaved: (saved: Game) => void;
+  /** `lineWarning` is set when an edit saved but the LINE group wasn't told. */
+  onSaved: (saved: Game, lineWarning: string | null) => void;
 }
 
 function emptySlots(): PlayerInput[] {
@@ -123,10 +124,12 @@ export default function GameSheet({
         shuttles_used: count,
         timestamp: timestampFor(date, editingGame?.timestamp),
       };
-      const saved = editingGame
-        ? await editGame(editingGame.game_id, payload)
-        : await addGame(payload);
-      onSaved(saved);
+      if (editingGame) {
+        const saved = await editGame(editingGame.game_id, payload);
+        onSaved(saved, saved.line_warning);
+      } else {
+        onSaved(await addGame(payload), null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกเกมไม่สำเร็จ');
     } finally {

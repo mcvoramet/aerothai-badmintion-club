@@ -56,6 +56,9 @@ export default function CalendarView() {
   const [form, setForm] = useState<{ date: string; editing: Game | null } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  // The change was saved, but the LINE group wasn't told about it. Worth
+  // showing — the group is how people learn their balance moved.
+  const [lineWarning, setLineWarning] = useState<string | null>(null);
 
   const games = useMemo(() => data?.games ?? [], [data]);
   const players = data?.players ?? [];
@@ -110,9 +113,10 @@ export default function CalendarView() {
 
   // The write already returned the saved row, so merge it in rather than
   // re-reading the whole month — that refetch used to cost ~2 extra seconds.
-  function handleSaved(saved: Game) {
+  function handleSaved(saved: Game, warning: string | null) {
     setForm(null);
     setMutationError(null);
+    setLineWarning(warning);
     update(applySaved(saved));
   }
 
@@ -121,8 +125,10 @@ export default function CalendarView() {
       return;
     setDeletingId(game.game_id);
     setMutationError(null);
+    setLineWarning(null);
     try {
-      await deleteGame(game.game_id);
+      const result = await deleteGame(game.game_id);
+      setLineWarning(result.line_warning);
       update((current) => ({
         ...current,
         games: current.games.filter((g) => g.game_id !== game.game_id),
@@ -162,6 +168,8 @@ export default function CalendarView() {
         {(error || mutationError) && (
           <div className="error-banner">{mutationError ?? error}</div>
         )}
+
+        {lineWarning && <div className="warning-banner">{lineWarning}</div>}
 
         <div className="calendar-grid">
           {WEEKDAYS.map((w) => (
