@@ -5,6 +5,7 @@ import type {
   GameEdit,
   GamePayload,
   LineStatus,
+  MergeResult,
   OutstandingPlayer,
   PaymentConfirmation,
   PaymentMethod,
@@ -107,6 +108,29 @@ export function editGame(gameId: string, payload: GamePayload): Promise<GameEdit
 /** Announces the deletion in the LINE group; see `GameDeletion.line_warning`. */
 export function deleteGame(gameId: string): Promise<GameDeletion> {
   return apiPost<GameDeletion>('deleteGame', { game_id: gameId });
+}
+
+/**
+ * Folds `sourceKey`'s games and payments into the target player.
+ *
+ * Because a player_key is `nickname|department`, choosing which name survives
+ * is part of the same call: pass `nickname`/`department` to keep the newly
+ * typed name (the target is renamed onto that key), or omit them to keep the
+ * existing one. `sourceKey` is optional — a name typed for the first time has
+ * no history to move, and the merge is then only the rename.
+ */
+export function mergePlayers(payload: {
+  targetKey: string;
+  sourceKey?: string;
+  nickname?: string;
+  department?: string;
+}): Promise<MergeResult> {
+  return apiPost<MergeResult>('mergePlayers', {
+    target_key: payload.targetKey,
+    source_key: payload.sourceKey ?? '',
+    nickname: payload.nickname ?? '',
+    department: payload.department ?? '',
+  });
 }
 
 export function settlePlayer(

@@ -100,6 +100,21 @@ export interface BootstrapData {
   games: Game[];
 }
 
+/**
+ * The result of folding one player into another.
+ *
+ * `player` is the survivor, already carrying the combined history; every game
+ * and settlement that named either side now points at it, so any player list
+ * or balance held in memory is stale once this comes back.
+ */
+export interface MergeResult {
+  player: Player;
+  /** The key that no longer exists, or null when this was only a rename. */
+  merged_from: string | null;
+  games_updated: number;
+  settlements_updated: number;
+}
+
 export interface PlayerInput {
   nickname: string;
   department: string;

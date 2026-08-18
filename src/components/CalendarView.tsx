@@ -51,7 +51,7 @@ export default function CalendarView() {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
-  const { data, refreshing, error, update } = useBootstrap(month);
+  const { data, refreshing, error, refresh, update } = useBootstrap(month);
   const [historyDay, setHistoryDay] = useState<string | null>(null);
   const [form, setForm] = useState<{ date: string; editing: Game | null } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -113,11 +113,16 @@ export default function CalendarView() {
 
   // The write already returned the saved row, so merge it in rather than
   // re-reading the whole month — that refetch used to cost ~2 extra seconds.
-  function handleSaved(saved: Game, warning: string | null) {
+  //
+  // Merging two players is the exception: it renames a person across every game
+  // and settlement in the sheet, so anything already on screen is out of date
+  // and the month has to come back from the server.
+  function handleSaved(saved: Game, warning: string | null, playersMerged: boolean) {
     setForm(null);
     setMutationError(null);
     setLineWarning(warning);
     update(applySaved(saved));
+    if (playersMerged) void refresh();
   }
 
   async function handleDelete(game: Game) {
@@ -266,7 +271,10 @@ export default function CalendarView() {
           editingGame={form.editing}
           players={players}
           pricePerShuttle={pricePerShuttle}
-          onClose={() => setForm(null)}
+          onClose={(playersMerged) => {
+            setForm(null);
+            if (playersMerged) void refresh();
+          }}
           onSaved={handleSaved}
         />
       )}

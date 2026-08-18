@@ -61,6 +61,9 @@ function handleRequest_(e, method) {
       case 'deleteGame':
         result = deleteGame(payload);
         break;
+      case 'mergePlayers':
+        result = mergePlayers(payload);
+        break;
       case 'settlePlayer':
         result = settlePlayer(payload);
         break;

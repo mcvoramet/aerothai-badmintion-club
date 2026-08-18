@@ -1,5 +1,7 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { addGame, editGame } from '../api/appsScript';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { addGame, editGame, mergePlayers } from '../api/appsScript';
+import { findSimilarPlayers, markDistinct, playerKeyOf } from '../lib/similarNames';
+import MergeNameDialog, { type MergeDecision, type NameConflict } from './MergeNameDialog';
 import type { Game, Player, PlayerInput } from '../types';
 
 const MAX_PLAYERS = 4;
@@ -11,9 +13,16 @@ interface Props {
   /** Current rate, already loaded with the calendar — avoids a round trip
    *  just to render the cost preview. Editing uses the game's frozen price. */
   pricePerShuttle: number | null;
-  onClose: () => void;
-  /** `lineWarning` is set when an edit saved but the LINE group wasn't told. */
-  onSaved: (saved: Game, lineWarning: string | null) => void;
+  /** `playersMerged` is true when names were merged before the sheet closed —
+   *  the merge stands even if the game was never saved. */
+  onClose: (playersMerged: boolean) => void;
+  /**
+   * `lineWarning` is set when an edit saved but the LINE group wasn't told.
+   * `playersMerged` means two people were folded into one on the way to saving,
+   * which rewrites keys across the whole sheet — the caller's cached month is
+   * stale and has to be re-read.
+   */
+  onSaved: (saved: Game, lineWarning: string | null, playersMerged: boolean) => void;
 }
 
 function emptySlots(): PlayerInput[] {
@@ -62,21 +71,44 @@ export default function GameSheet({
   const [activeSlot, setActiveSlot] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Set once a name turns out to look like someone already in the book. The
+  // cleaned slots ride along, because answering the question rewrites them and
+  // nothing is saved until the last one is answered.
+  const [pending, setPending] = useState<{
+    slots: PlayerInput[];
+    queue: NameConflict[];
+    /** Questions in the original batch, so the counter doesn't count down. */
+    total: number;
+  } | null>(null);
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
+  // A ref, not state: the save fires in the same tick as the last merge.
+  const mergedAny = useRef(false);
+  const close = () => onClose(mergedAny.current);
   // Editing keeps the game's frozen price; new games preview at the current rate.
   const price = editingGame ? editingGame.price_per_shuttle_at_time : pricePerShuttle;
+
+  // Read inside the key handler, which is registered once and must not see a
+  // stale `pending` — or a `close` bound to a merge that hadn't happened yet.
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
+  const closeRef = useRef(close);
+  closeRef.current = close;
 
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
+      // While the merge question is up it owns Escape — closing the whole form
+      // underneath it would throw away everything typed.
+      if (e.key === 'Escape' && !pendingRef.current) closeRef.current();
     }
     window.addEventListener('keydown', onKey);
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, []);
 
   function updateSlot(i: number, value: PlayerInput) {
     setSlots((prev) => prev.map((s, idx) => (idx === i ? value : s)));
@@ -99,36 +131,39 @@ export default function GameSheet({
     return list.slice(0, 5);
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setError(null);
-
-    if (slots.length < 1) {
-      setError('ต้องมีผู้เล่นอย่างน้อย 1 คน');
-      return;
-    }
-    if (slots.some((s) => !s.nickname.trim() || !s.department.trim())) {
-      setError('กรุณากรอกชื่อเล่นและกองให้ครบทุกคน (หรือลบช่องที่ไม่ใช้ออก)');
-      return;
+  function validate(cleaned: PlayerInput[]): string | null {
+    if (cleaned.length < 1) return 'ต้องมีผู้เล่นอย่างน้อย 1 คน';
+    if (cleaned.some((s) => !s.nickname || !s.department)) {
+      return 'กรุณากรอกชื่อเล่นและกองให้ครบทุกคน (หรือลบช่องที่ไม่ใช้ออก)';
     }
     const count = Number(shuttles);
     if (!isFinite(count) || count <= 0 || !Number.isInteger(count)) {
-      setError('จำนวนลูกขนไก่ต้องเป็นจำนวนเต็มที่มากกว่า 0');
-      return;
+      return 'จำนวนลูกขนไก่ต้องเป็นจำนวนเต็มที่มากกว่า 0';
     }
+    // Merging can bring two slots onto the same person, which would charge them
+    // twice for one game.
+    const seen = new Set<string>();
+    for (const slot of cleaned) {
+      const key = playerKeyOf(slot);
+      if (seen.has(key)) return `${slot.nickname} ถูกใส่ไว้ซ้ำในเกมนี้ — ลบช่องที่ซ้ำออกก่อนบันทึก`;
+      seen.add(key);
+    }
+    return null;
+  }
 
+  async function save(finalSlots: PlayerInput[]) {
     setSaving(true);
     try {
       const payload = {
-        players: slots,
-        shuttles_used: count,
+        players: finalSlots,
+        shuttles_used: Number(shuttles),
         timestamp: timestampFor(date, editingGame?.timestamp),
       };
       if (editingGame) {
         const saved = await editGame(editingGame.game_id, payload);
-        onSaved(saved, saved.line_warning);
+        onSaved(saved, saved.line_warning, mergedAny.current);
       } else {
-        onSaved(await addGame(payload), null);
+        onSaved(await addGame(payload), null, mergedAny.current);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกเกมไม่สำเร็จ');
@@ -137,9 +172,109 @@ export default function GameSheet({
     }
   }
 
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const cleaned = slots.map((s) => ({
+      nickname: s.nickname.trim(),
+      department: s.department.trim(),
+    }));
+    const problem = validate(cleaned);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+
+    // Asked before saving, not after: once the game is written, the second name
+    // has a history of its own and untangling it is a manual job.
+    const queue = cleaned
+      .map((input, slot) => ({ slot, input, candidates: findSimilarPlayers(input, players) }))
+      .filter((c) => c.candidates.length > 0);
+    if (queue.length) {
+      setSlots(cleaned);
+      setPending({ slots: cleaned, queue, total: queue.length });
+      return;
+    }
+
+    await save(cleaned);
+  }
+
+  async function handleDecision(decision: MergeDecision) {
+    if (!pending) return;
+    const [conflict, ...rest] = pending.queue;
+    const sourceKey = playerKeyOf(conflict.input);
+    setMergeError(null);
+
+    let nextSlots = pending.slots;
+    let nextQueue = rest;
+
+    if (decision.type === 'distinct') {
+      conflict.candidates.forEach((c) => markDistinct(sourceKey, c.player.player_key));
+    } else {
+      setMerging(true);
+      try {
+        const keepNewName = decision.type === 'use-new-name';
+        const result = await mergePlayers({
+          targetKey: decision.target.player_key,
+          // A name typed for the first time isn't in the sheet yet, so there is
+          // nothing to move — the merge is only the rename.
+          sourceKey: players.some((p) => p.player_key === sourceKey) ? sourceKey : undefined,
+          nickname: keepNewName ? conflict.input.nickname : undefined,
+          department: keepNewName ? conflict.input.department : undefined,
+        });
+        mergedAny.current = true;
+        const survivor = result.player;
+        nextSlots = pending.slots.map((slot, i) =>
+          i === conflict.slot
+            ? { nickname: survivor.nickname, department: survivor.department }
+            : slot
+        );
+        // Questions still in the queue may name a key this merge just retired.
+        nextQueue = rest
+          .map((c) => {
+            const seen = new Set<string>();
+            const candidates = c.candidates
+              .map((cand) =>
+                cand.player.player_key === decision.target.player_key ||
+                cand.player.player_key === sourceKey
+                  ? { ...cand, player: survivor }
+                  : cand
+              )
+              .filter((cand) => {
+                if (cand.player.player_key === playerKeyOf(c.input)) return false;
+                if (seen.has(cand.player.player_key)) return false;
+                seen.add(cand.player.player_key);
+                return true;
+              });
+            return { ...c, candidates };
+          })
+          .filter((c) => c.candidates.length > 0);
+      } catch (err) {
+        setMergeError(err instanceof Error ? err.message : 'รวมชื่อผู้เล่นไม่สำเร็จ');
+        return;
+      } finally {
+        setMerging(false);
+      }
+    }
+
+    setSlots(nextSlots);
+    if (nextQueue.length) {
+      setPending({ slots: nextSlots, queue: nextQueue, total: pending.total });
+      return;
+    }
+    setPending(null);
+    const problem = validate(nextSlots);
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    await save(nextSlots);
+  }
+
   return (
     <>
-      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet-backdrop" onClick={close} />
       <div className="sheet" role="dialog" aria-modal="true">
         <div className="sheet-handle" />
 
@@ -152,7 +287,7 @@ export default function GameSheet({
                 : 'เลือกวันที่และกรอกผู้เล่น 1–4 คน (ค่าลูกขนไก่หารตามจำนวนคน)'}
             </div>
           </div>
-          <button type="button" className="sheet-close" onClick={onClose} aria-label="ปิด">
+          <button type="button" className="sheet-close" onClick={close} aria-label="ปิด">
             ×
           </button>
         </div>
@@ -261,7 +396,7 @@ export default function GameSheet({
           {error && <div className="error-banner">{error}</div>}
 
           <div className="sheet-actions">
-            <button type="button" className="sheet-btn-cancel" onClick={onClose}>
+            <button type="button" className="sheet-btn-cancel" onClick={close}>
               ยกเลิก
             </button>
             <button type="submit" className="sheet-btn-save" disabled={saving}>
@@ -270,6 +405,21 @@ export default function GameSheet({
           </div>
         </form>
       </div>
+
+      {pending && (
+        <MergeNameDialog
+          conflict={pending.queue[0]}
+          index={pending.total - pending.queue.length}
+          total={pending.total}
+          busy={merging}
+          error={mergeError}
+          onDecide={handleDecision}
+          onCancel={() => {
+            setPending(null);
+            setMergeError(null);
+          }}
+        />
+      )}
     </>
   );
 }
