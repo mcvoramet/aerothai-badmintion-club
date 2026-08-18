@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { confirmPayment, getPlayerBalance } from '../api/appsScript';
-import type { OutstandingPlayer, PaymentMethod, PlayerBalance } from '../types';
+import type { Game, OutstandingPlayer, PaymentMethod, PlayerBalance } from '../types';
 
 interface Props {
   player: OutstandingPlayer;
@@ -42,6 +42,13 @@ async function prepareSlip(file: File): Promise<Slip> {
 
   const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
   return { dataUrl, base64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/jpeg' };
+}
+
+// Slots this person held in the game. Two when they covered someone else's
+// share, and then they owe two of its shares — the row has to say so, or it
+// won't add up to the total above it.
+function sharesIn(game: Game, playerKey: string) {
+  return game.players.filter((p) => p.player_key === playerKey).length;
 }
 
 export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Props) {
@@ -193,13 +200,20 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
                 <div className="sheet-existing-head">
                   <span>รายการเกมที่ค้างชำระ</span>
                 </div>
-                {detail.games.map((game) => (
-                  <div key={game.game_id} className="pay-game-row">
-                    <span>{thaiDate(game.timestamp)}</span>
-                    <span className="balance-label">{game.shuttles_used} ลูก</span>
-                    <span className="game-card-cost">{game.cost_per_player.toFixed(2)} ฿</span>
-                  </div>
-                ))}
+                {detail.games.map((game) => {
+                  const shares = sharesIn(game, detail.player_key);
+                  return (
+                    <div key={game.game_id} className="pay-game-row">
+                      <span>{thaiDate(game.timestamp)}</span>
+                      <span className="balance-label">
+                        {game.shuttles_used} ลูก{shares > 1 ? ` · ${shares} ส่วน` : ''}
+                      </span>
+                      <span className="game-card-cost">
+                        {(game.cost_per_player * shares).toFixed(2)} ฿
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
 

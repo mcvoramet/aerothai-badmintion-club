@@ -52,6 +52,25 @@ function resolveTimestamp_(value) {
   return d.toISOString();
 }
 
+// Slot keys for a payload, creating players as needed.
+//
+// A person may hold more than one slot when they're covering someone else's
+// share, so the same key can come back twice. The Players row is touched once
+// per person even then: it's still one game they played, and games_count would
+// otherwise drift up faster than the games they appear in.
+function resolvePlayerKeys_(players) {
+  var seen = {};
+  return players.map(function (p) {
+    var nickname = String(p.nickname).trim();
+    var department = String(p.department).trim();
+    var key = playerKey(nickname, department);
+    if (!Object.prototype.hasOwnProperty.call(seen, key)) {
+      seen[key] = findOrCreatePlayer_(nickname, department);
+    }
+    return seen[key];
+  });
+}
+
 function findGameRow_(sheet, gameId) {
   var rows = readSheetAsObjects(sheet);
   var match = rows.filter(function (r) {
@@ -106,14 +125,13 @@ function addGame(payload) {
     var settings = getSettings();
     var price = settings.price_per_shuttle;
     var total = round2_(shuttles * price);
-    // Split across however many players were logged, not always 4.
+    // Split across however many slots were logged, not always 4. A person
+    // entered twice holds two slots and so pays two of these shares.
     var perPlayer = round2_(total / payload.players.length);
     var ts = resolveTimestamp_(payload.timestamp);
     var gameId = makeId('G');
 
-    var keys = payload.players.map(function (p) {
-      return findOrCreatePlayer_(String(p.nickname).trim(), String(p.department).trim());
-    });
+    var keys = resolvePlayerKeys_(payload.players);
 
     var row = {
       game_id: gameId,
@@ -159,9 +177,7 @@ function editGame(payload) {
     var perPlayer = round2_(total / payload.players.length);
     var ts = nowIso();
 
-    var keys = payload.players.map(function (p) {
-      return findOrCreatePlayer_(String(p.nickname).trim(), String(p.department).trim());
-    });
+    var keys = resolvePlayerKeys_(payload.players);
 
     var row = {
       game_id: existing.game_id,

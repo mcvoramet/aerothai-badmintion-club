@@ -60,6 +60,14 @@ export default function MergeNameDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [busy, onCancel]);
 
+  // Two people can share a nickname across departments, and then the กอง is the
+  // only thing telling them apart — it has to be in the wording, not just in
+  // the pills, or both merge buttons would read identically.
+  const sameNickname = conflict.input.nickname.trim() === target.nickname.trim();
+  const otherDepartment = conflict.input.department.trim() !== target.department.trim();
+  const label = (p: { nickname: string; department: string }) =>
+    otherDepartment ? fullName(p) : p.nickname;
+
   return (
     <>
       <div className="merge-backdrop" />
@@ -67,10 +75,13 @@ export default function MergeNameDialog({
         <div className="merge-head">
           <div>
             <div className="sheet-title" id="merge-title">
-              ชื่อนี้อาจเป็นคนเดียวกัน
+              {sameNickname && otherDepartment
+                ? 'ชื่อเดียวกัน แต่คนละกอง'
+                : 'ชื่อนี้อาจเป็นคนเดียวกัน'}
             </div>
             <div className="sheet-subtitle">
-              พบชื่อที่คล้ายกับ <strong>{conflict.input.nickname}</strong> อยู่แล้ว
+              พบชื่อที่คล้ายกับ <strong>{conflict.input.nickname}</strong> (
+              {conflict.input.department}) อยู่แล้ว
               {total > 1 && ` · ${index + 1}/${total}`}
             </div>
           </div>
@@ -122,7 +133,7 @@ export default function MergeNameDialog({
             disabled={busy}
             onClick={() => onDecide({ type: 'keep-existing', target })}
           >
-            <span className="merge-btn-title">รวมกัน — ใช้ชื่อเดิม “{target.nickname}”</span>
+            <span className="merge-btn-title">รวมกัน — ใช้ชื่อเดิม “{label(target)}”</span>
             <span className="merge-btn-note">
               ประวัติและยอดค้างของทั้งสองชื่อจะรวมเป็นคนเดียว โดยใช้ชื่อที่มีอยู่แล้ว
             </span>
@@ -135,7 +146,7 @@ export default function MergeNameDialog({
             onClick={() => onDecide({ type: 'use-new-name', target })}
           >
             <span className="merge-btn-title">
-              รวมกัน — เปลี่ยนเป็นชื่อใหม่ “{conflict.input.nickname}”
+              รวมกัน — เปลี่ยนเป็นชื่อใหม่ “{label(conflict.input)}”
             </span>
             <span className="merge-btn-note">
               รวมเป็นคนเดียวเหมือนกัน แต่เปลี่ยนชื่อ {fullName(target)} เป็นชื่อที่เพิ่งพิมพ์
@@ -151,7 +162,11 @@ export default function MergeNameDialog({
           >
             <span className="merge-btn-title">คนละคน — บันทึกแยกกัน</span>
             <span className="merge-btn-note">
-              เก็บทั้งสองชื่อไว้แยกกัน และจะไม่ถามคู่นี้อีก
+              {sameNickname && otherDepartment
+                ? `ชื่อซ้ำกันแต่เป็นคนละคน เก็บ ${fullName(conflict.input)} กับ ${fullName(
+                    target
+                  )} ไว้แยกกัน และจะไม่ถามคู่นี้อีก`
+                : 'เก็บทั้งสองชื่อไว้แยกกัน และจะไม่ถามคู่นี้อีก'}
             </span>
           </button>
         </div>

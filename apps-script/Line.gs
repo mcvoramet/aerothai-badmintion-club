@@ -418,8 +418,8 @@ function notifyGameChange_(kind, before, after) {
 }
 
 // Everyone the change touched: whoever was in the game before, whoever is in it
-// after, or both. `was`/`now` are that person's share of the game on each side,
-// null when they weren't in it — which is what makes an added or removed player
+// after, or both. `was`/`now` are what that person owed for the game on each
+// side — two shares if they held two slots — and null when they weren't in it — which is what makes an added or removed player
 // readable at a glance.
 //
 // Balances are read after the write has committed, so the number next to each
@@ -449,14 +449,18 @@ function affectedPlayers_(before, after) {
     return entry;
   }
 
+  // Added up per slot, not per person: somebody covering two shares of the
+  // game should see both of them in the number next to their name.
   if (before) {
     before.players.forEach(function (p) {
-      slotFor(p).was = Number(before.cost_per_player);
+      var entry = slotFor(p);
+      entry.was = round2_((entry.was || 0) + Number(before.cost_per_player));
     });
   }
   if (after) {
     after.players.forEach(function (p) {
-      slotFor(p).now = Number(after.cost_per_player);
+      var entry = slotFor(p);
+      entry.now = round2_((entry.now || 0) + Number(after.cost_per_player));
     });
   }
   return order;

@@ -9,6 +9,20 @@ function getGamesForPlayer_(playerKeyValue) {
   });
 }
 
+// How many of a game's slots this player fills.
+//
+// Normally one, but the same person can be entered twice when they cover
+// somebody else's share ("this round is on me"). The cost is split across
+// slots, so holding two slots means owing two shares of that game — every
+// place that turns games into money has to multiply by this.
+function sharesInGame_(row, playerKeyValue) {
+  var shares = 0;
+  for (var i = 1; i <= 4; i++) {
+    if (row['player' + i + '_key'] === playerKeyValue) shares++;
+  }
+  return shares;
+}
+
 function getSettlementsForPlayer_(playerKeyValue) {
   var sheet = getSheet(SHEET_NAMES.SETTLEMENTS);
   var rows = readSheetAsObjects(sheet);
@@ -72,7 +86,7 @@ function computeBalance_(playerKeyValue) {
     });
   var balance = round2_(
     unpaid.reduce(function (sum, g) {
-      return sum + Number(g.cost_per_player);
+      return sum + Number(g.cost_per_player) * sharesInGame_(g, playerKeyValue);
     }, 0)
   );
   return {
@@ -146,6 +160,8 @@ function getOutstanding() {
         lastGameAt[key] = r.timestamp;
       }
       if (cutoff[key] !== undefined && createdAt <= cutoff[key]) continue; // already paid
+      // Slot by slot, so somebody holding two slots of one game is charged for
+      // both — see sharesInGame_.
       owed[key] = (owed[key] || 0) + Number(r.cost_per_player);
     }
   });

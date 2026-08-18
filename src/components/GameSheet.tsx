@@ -131,6 +131,21 @@ export default function GameSheet({
     return list.slice(0, 5);
   }
 
+  // Anyone holding more than one slot, with how many shares they carry — the
+  // cost preview says "คนละ X" and that stops being true for them.
+  function extraShares() {
+    const counts = new Map<string, { nickname: string; shares: number }>();
+    for (const slot of slots) {
+      const nickname = slot.nickname.trim();
+      if (!nickname || !slot.department.trim()) continue;
+      const key = playerKeyOf(slot);
+      const entry = counts.get(key);
+      if (entry) entry.shares++;
+      else counts.set(key, { nickname, shares: 1 });
+    }
+    return [...counts.values()].filter((c) => c.shares > 1);
+  }
+
   function validate(cleaned: PlayerInput[]): string | null {
     if (cleaned.length < 1) return 'ต้องมีผู้เล่นอย่างน้อย 1 คน';
     if (cleaned.some((s) => !s.nickname || !s.department)) {
@@ -140,14 +155,8 @@ export default function GameSheet({
     if (!isFinite(count) || count <= 0 || !Number.isInteger(count)) {
       return 'จำนวนลูกขนไก่ต้องเป็นจำนวนเต็มที่มากกว่า 0';
     }
-    // Merging can bring two slots onto the same person, which would charge them
-    // twice for one game.
-    const seen = new Set<string>();
-    for (const slot of cleaned) {
-      const key = playerKeyOf(slot);
-      if (seen.has(key)) return `${slot.nickname} ถูกใส่ไว้ซ้ำในเกมนี้ — ลบช่องที่ซ้ำออกก่อนบันทึก`;
-      seen.add(key);
-    }
+    // A repeated name is allowed on purpose: someone covering a friend's share
+    // takes a second slot, and the split charges them for both.
     return null;
   }
 
@@ -188,9 +197,18 @@ export default function GameSheet({
 
     // Asked before saving, not after: once the game is written, the second name
     // has a history of its own and untangling it is a manual job.
+    //
+    // One question per name, not per slot — a person entered twice to cover a
+    // friend's share shouldn't be asked about twice.
+    const asked = new Set<string>();
     const queue = cleaned
       .map((input, slot) => ({ slot, input, candidates: findSimilarPlayers(input, players) }))
-      .filter((c) => c.candidates.length > 0);
+      .filter((c) => {
+        const key = playerKeyOf(c.input);
+        if (!c.candidates.length || asked.has(key)) return false;
+        asked.add(key);
+        return true;
+      });
     if (queue.length) {
       setSlots(cleaned);
       setPending({ slots: cleaned, queue, total: queue.length });
@@ -225,8 +243,10 @@ export default function GameSheet({
         });
         mergedAny.current = true;
         const survivor = result.player;
-        nextSlots = pending.slots.map((slot, i) =>
-          i === conflict.slot
+        // Every slot holding that name, not just the one that raised the
+        // question: a person covering two shares is still one person.
+        nextSlots = pending.slots.map((slot) =>
+          playerKeyOf(slot) === sourceKey
             ? { nickname: survivor.nickname, department: survivor.department }
             : slot
         );
@@ -387,9 +407,19 @@ export default function GameSheet({
                 <strong>{(price * Number(shuttles)).toFixed(2)} บ.</strong>
               </div>
               <div className="cost-preview-row split">
-                <span>หารกับผู้เล่น {slots.length} คน</span>
+                <span>หารเป็น {slots.length} ส่วน</span>
                 <strong>คนละ {((price * Number(shuttles)) / slots.length).toFixed(2)} บ.</strong>
               </div>
+              {extraShares().map((c) => (
+                <div key={c.nickname} className="cost-preview-row">
+                  <span>
+                    {c.nickname} อยู่ {c.shares} ช่อง (ออกแทนเพื่อน)
+                  </span>
+                  <strong>
+                    จ่าย {((price * Number(shuttles) * c.shares) / slots.length).toFixed(2)} บ.
+                  </strong>
+                </div>
+              ))}
             </div>
           )}
 

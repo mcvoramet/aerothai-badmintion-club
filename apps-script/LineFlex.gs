@@ -368,6 +368,23 @@ function affectedRow_(entry, kind) {
   };
 }
 
+// "4 คน", or "3 คน (4 ส่วน)" when somebody is in the game more than once —
+// the head count and the number of shares the cost was split into stop being
+// the same number as soon as one person covers two slots.
+function playersLabel_(game) {
+  var seen = {};
+  var people = 0;
+  game.players.forEach(function (p) {
+    if (!Object.prototype.hasOwnProperty.call(seen, p.player_key)) {
+      seen[p.player_key] = true;
+      people++;
+    }
+  });
+  return people === game.players.length
+    ? people + ' คน'
+    : people + ' คน (' + game.players.length + ' ส่วน)';
+}
+
 // Announces that a recorded game was edited or deleted.
 //
 // `after` is null for a delete, in which case every field is shown as it stood
@@ -384,7 +401,7 @@ function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
   var details = [
     row('วันที่เล่น', formatThaiDateTime_(before.timestamp), formatThaiDateTime_(latest.timestamp)),
     row('ลูกขนไก่', before.shuttles_used + ' ลูก', latest.shuttles_used + ' ลูก'),
-    row('ผู้เล่น', before.players.length + ' คน', latest.players.length + ' คน'),
+    row('ผู้เล่น', playersLabel_(before), playersLabel_(latest)),
     row('รวม', '฿' + formatAmount_(before.total_cost), '฿' + formatAmount_(latest.total_cost)),
     row(
       'คนละ',
