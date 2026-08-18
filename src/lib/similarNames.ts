@@ -14,20 +14,19 @@ import type { Player, PlayerInput } from '../types';
  * can be called ลีน.
  */
 
-/** Thai kinship prefixes used as politeness, not as part of the name. */
-const HONORIFICS = [
-  'น้อง',
-  'พี่',
-  'คุณ',
-  'ป๋า',
-  'ป้า',
-  'ลุง',
-  'น้า',
-  'เจ๊',
-  'เฮีย',
-  'ไอ้',
-  'หนู',
-];
+/**
+ * Politeness prefixes, dropped before two names are compared.
+ *
+ * Deliberately only these three. They carry no identity — "พี่เอก" and
+ * "น้องเอก" are both just เอก — so what matters is the name underneath, and
+ * comparing the whole written form instead would make "พี่บอล" and "พี่บิว"
+ * look alike purely because they share a พี่.
+ *
+ * Other kinship words (ป้า, ลุง, น้า, เฮีย…) are left alone on purpose: they
+ * often are how the club tells two people apart, and a one-sided prefix is
+ * caught by containment anyway — "ลุงหมู" still holds "หมู".
+ */
+const HONORIFICS = ['น้อง', 'พี่', 'คุณ'];
 
 // Tone marks and การันต์ are written inconsistently and never separate two
 // different people, so they're dropped before comparing.
@@ -38,12 +37,14 @@ function normalize(raw: string) {
 }
 
 /**
- * The name with its honorific taken off — "น้องไอลีน" → "ไอลีน".
+ * The name with its politeness prefix taken off — "น้องไอลีน" → "ไอลีน".
  *
- * Only one prefix comes off, and only when at least two characters survive:
- * stripping "ป้า" out of "ป้าง" would leave a fragment that matches anything.
+ * This is the only form names are compared in, so a shared prefix can never
+ * make two people look related. One prefix comes off, and only when at least
+ * two characters survive: nothing is left of "พี่" itself to compare.
  */
-function core(normalized: string) {
+function core(raw: string) {
+  const normalized = normalize(raw);
   for (const honorific of HONORIFICS) {
     const prefix = normalize(honorific);
     if (normalized.startsWith(prefix) && normalized.length - prefix.length >= 2) {
@@ -51,19 +52,6 @@ function core(normalized: string) {
     }
   }
   return normalized;
-}
-
-/**
- * The forms a name is compared in: as written, and with the honorific off.
- *
- * Both are kept because stripping isn't symmetric — "เจมส์" keeps its เจ (too
- * little would be left of it), while "เจม" loses nothing, and comparing only
- * the stripped forms would miss that they're the same name.
- */
-function variantsOf(raw: string) {
-  const normalized = normalize(raw);
-  const stripped = core(normalized);
-  return stripped === normalized ? [normalized] : [normalized, stripped];
 }
 
 function levenshtein(a: string, b: string) {
@@ -88,20 +76,14 @@ function levenshtein(a: string, b: string) {
 /**
  * How alike two nicknames read, 0–1, or 0 when they aren't worth asking about.
  *
- * Containment is what catches the honorific case ("ไอลีน" holds "ลีน"), and
- * edit distance catches the spelling drift ("เอก" / "เอ้ก").
+ * Only the core names meet each other: "พี่เอก" vs "น้องเอก" is เอก vs เอก,
+ * and "พี่บอล" vs "พี่บิว" is บอล vs บิว — different people, no question
+ * asked. Containment is what catches the honorific case ("ไอลีน" holds
+ * "ลีน"), and edit distance catches spelling drift ("เอก" / "เอ้ก").
  */
 export function nicknameSimilarity(a: string, b: string): number {
-  let best = 0;
-  for (const left of variantsOf(a)) {
-    for (const right of variantsOf(b)) {
-      best = Math.max(best, closeness(left, right));
-    }
-  }
-  return best;
-}
-
-function closeness(left: string, right: string): number {
+  const left = core(a);
+  const right = core(b);
   if (!left || !right) return 0;
   if (left === right) return 1;
 
