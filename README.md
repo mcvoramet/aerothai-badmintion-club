@@ -112,6 +112,7 @@ git add -A && git commit -m "Badminton shuttle cost tracker" && git branch -M ma
 |---|---|
 | ได้ HTML กลับมาแทน JSON / เว็บโหลดข้อมูลไม่ขึ้น | deployment ตั้ง access ไม่เป็น **Anyone** — Google ส่งหน้า login มาแทน ไปที่ Deploy → Manage deployments → แก้เป็น Anyone |
 | แก้โค้ด `.gs` แล้วเว็บยังทำงานแบบเดิม | ต้องกด Deploy → Manage deployments → ไอคอนดินสอ → Version: **New version** → Deploy (URL เดิมจะชี้ไปโค้ดใหม่) |
+| `notifyGameChange_ is not defined` | ไฟล์ `Line.gs` ในโปรเจกต์ Apps Script เก่ากว่า `Games.gs` (ยังไม่มีฟังก์ชันแจ้งเตือนตอนแก้ไข/ลบเกม) — คัดลอก `Line.gs` และ `LineFlex.gs` ใหม่ทั้งไฟล์ แล้ว **Deploy → Manage deployments → New version** ตัวเกมยังถูกลบ/แก้ไขสำเร็จอยู่แล้ว แค่ไม่ได้แจ้งเข้ากลุ่ม LINE |
 | `ไม่พบชีต: Games` | ยังไม่ได้รัน `setupSheets` หรือชื่อแท็บถูกแก้ ต้องเป็น `Players`, `Games`, `Settlements`, `Settings` เป๊ะ ๆ |
 | บันทึกเกมไม่ได้ แต่ดูข้อมูลได้ | มักเป็นปัญหา CORS ตอน POST — ตรวจว่า deploy เวอร์ชันล่าสุดแล้ว (โค้ดฝั่ง frontend ส่งเป็น `text/plain` เพื่อเลี่ยง preflight อยู่แล้ว) |
 | องค์กรไม่ให้เลือก "Anyone" | ดูหัวข้อ "ข้อจำกัดของ Google Workspace" ด้านล่าง |
