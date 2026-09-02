@@ -17,6 +17,7 @@ var LINE_PROP = {
   TOKEN: 'LINE_CHANNEL_ACCESS_TOKEN',
   WEBHOOK_TOKEN: 'LINE_WEBHOOK_TOKEN',
   TARGET_ID: 'LINE_TARGET_ID',
+  TARGET_IDS: 'LINE_TARGET_IDS',
   APP_URL: 'LINE_LIFF_URL',
   TRIGGER_WORD: 'LINE_TRIGGER_WORD',
   SLIP_FOLDER_ID: 'LINE_SLIP_FOLDER_ID',
@@ -26,6 +27,7 @@ var LINE_PROP = {
 
 var LINE_API_BASE = 'https://api.line.me/v2/bot';
 var LINE_PUSH_COOLDOWN_MS = 30000;
+var LINE_NOT_LINKED_MESSAGE = 'ยังไม่ได้เชื่อมกลุ่ม LINE — เพิ่มบอทเข้ากลุ่ม';
 
 // Slips are relayed, not archived. LINE copies the image onto its own CDN when
 // the message is sent, so the chat keeps showing it long after the file is gone.
@@ -47,31 +49,92 @@ function lineToken_() {
   return token;
 }
 
-function lineTargetId_() {
-  return lineProp_(LINE_PROP.TARGET_ID);
+// Every chat the bot pushes to. Replies (the trigger word) go back to whoever
+// asked and need none of this; pushes — the slip announcement, the edit/delete
+// notice, the button in Settings — have to name a destination, and there is
+// more than one club group.
+//
+// Stored as a JSON array in LINE_TARGET_IDS. LINE_TARGET_ID is kept in sync
+// with the first entry so the older single-target property still reads true
+// for anything looking at it by hand.
+function lineTargets_() {
+  var raw = lineProp_(LINE_PROP.TARGET_IDS);
+  if (!raw) {
+    // Never migrated: adopt whatever the single-target era left behind.
+    var legacy = lineProp_(LINE_PROP.TARGET_ID);
+    return legacy ? [legacy] : [];
+  }
+  var ids;
+  try {
+    ids = JSON.parse(raw);
+  } catch (err) {
+    ids = [];
+  }
+  if (!Array.isArray(ids)) return [];
+  return ids.filter(function (id) {
+    return typeof id === 'string' && id.length > 0;
+  });
 }
 
-// Captured from the webhook so setup is "add the bot to the group and say
-// anything once" instead of hunting for a group id.
+// The primary chat — the first group the bot was added to. Only for status and
+// diagnostics; pushes go to lineTargets_(), not here.
+function lineTargetId_() {
+  var targets = lineTargets_();
+  return targets.length ? targets[0] : '';
+}
+
+function saveLineTargets_(ids) {
+  var seen = {};
+  var unique = ids.filter(function (id) {
+    if (!id || seen[id]) return false;
+    seen[id] = true;
+    return true;
+  });
+  var props = {};
+  props[LINE_PROP.TARGET_IDS] = JSON.stringify(unique);
+  props[LINE_PROP.TARGET_ID] = unique.length ? unique[0] : '';
+  lineProps_().setProperties(props);
+  return unique;
+}
+
+// The chat an event came from: the group, or the person in a 1:1.
+function lineSourceId_(source) {
+  if (!source) return '';
+  return source.groupId || source.roomId || source.userId || '';
+}
+
+// Captured from the webhook so setup is "add the bot to the group" instead of
+// hunting for a group id. Every group the bot is in gets announcements —
+// adding it to a second group does not unlink the first.
 //
-// Deliberately NOT last-write-wins: a member sending the bot a direct message
-// would otherwise silently redirect the club's list into their private chat.
-// Once a group is locked in, only editing Script Properties by hand moves it.
-// A group does replace a 1:1 target, so testing in a DM first then adding the
-// bot to the real group works without a manual reset.
+// A 1:1 chat is only ever a stand-in for a group that doesn't exist yet: it is
+// taken while nothing else is known, and dropped the moment a real group
+// appears. Without that, a member messaging the bot privately would quietly
+// add their own DM to the club's announcement list.
 function rememberLineTarget_(source) {
-  if (!source) return;
-  var groupId = source.groupId || source.roomId;
-  var id = groupId || source.userId;
+  var id = lineSourceId_(source);
   if (!id) return;
 
-  var current = lineTargetId_();
-  if (current === id) return;
-  // Already pointed at a group: leave it alone.
-  if (current && !groupId) return;
-  if (current && groupId && isGroupTarget_(current)) return;
+  var targets = lineTargets_();
+  if (targets.indexOf(id) !== -1) return;
 
-  lineProps_().setProperty(LINE_PROP.TARGET_ID, id);
+  if (isGroupTarget_(id)) {
+    saveLineTargets_(targets.filter(isGroupTarget_).concat([id]));
+    return;
+  }
+  if (targets.length) return;
+  saveLineTargets_([id]);
+}
+
+// Removing the bot from a group must stop its announcements — otherwise the
+// test group keeps getting the club's slips forever.
+function forgetLineTarget_(id) {
+  if (!id) return;
+  var targets = lineTargets_();
+  if (targets.indexOf(id) === -1) return;
+  saveLineTargets_(targets.filter(function (t) {
+    return t !== id;
+  }));
 }
 
 // Group ids start with C, multi-person room ids with R, users with U.
@@ -79,14 +142,18 @@ function isGroupTarget_(id) {
   return id.charAt(0) === 'C' || id.charAt(0) === 'R';
 }
 
-function lineApi_(path, payload) {
-  var res = UrlFetchApp.fetch(LINE_API_BASE + path, {
+function lineFetch_(path, payload) {
+  return UrlFetchApp.fetch(LINE_API_BASE + path, {
     method: 'post',
     contentType: 'application/json',
     headers: { Authorization: 'Bearer ' + lineToken_() },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true,
   });
+}
+
+function lineApi_(path, payload) {
+  var res = lineFetch_(path, payload);
   var code = res.getResponseCode();
   if (code < 200 || code >= 300) {
     throw new Error('LINE API ผิดพลาด (' + code + '): ' + res.getContentText());
@@ -94,9 +161,48 @@ function lineApi_(path, payload) {
   return res.getContentText();
 }
 
-function linePush_(to, messages) {
-  if (!to) throw new Error('ยังไม่ได้เชื่อมกลุ่ม LINE — เพิ่มบอทเข้ากลุ่มแล้วพิมพ์อะไรก็ได้ 1 ครั้ง');
-  return lineApi_('/message/push', { to: to, messages: messages });
+// Sends the same messages to every linked chat. This is what makes an
+// announcement reach the group the bot was just added to instead of only the
+// one it saw first.
+//
+// Each destination costs one message against the monthly quota, so the count
+// here is the number of groups, not one flat send.
+//
+// 403/404 is LINE's answer for "this bot can no longer post there" — the group
+// was deleted, or the bot was removed from it. Those ids are dropped rather
+// than retried forever; a group that comes back re-registers itself on the
+// next event from it. Any other failure (a bad token, a malformed message, a
+// LINE outage) is left alone: it is not the destination's fault, and forgetting
+// the group over it would unlink the club.
+function linePushAll_(messages) {
+  var targets = lineTargets_();
+  if (!targets.length) throw new Error(LINE_NOT_LINKED_MESSAGE);
+
+  var sent = 0;
+  var stale = [];
+  var lastError = null;
+
+  targets.forEach(function (to) {
+    var res = lineFetch_('/message/push', { to: to, messages: messages });
+    var code = res.getResponseCode();
+    if (code >= 200 && code < 300) {
+      sent++;
+      return;
+    }
+    if (code === 403 || code === 404) {
+      stale.push(to);
+      console.warn('LINE target ' + to + ' is gone (' + code + ') — unlinking it');
+      return;
+    }
+    lastError = new Error('LINE API ผิดพลาด (' + code + '): ' + res.getContentText());
+  });
+
+  stale.forEach(forgetLineTarget_);
+
+  if (!sent) {
+    throw lastError || new Error(LINE_NOT_LINKED_MESSAGE);
+  }
+  return sent;
 }
 
 // Replies land in whichever chat sent the message and, unlike pushes, don't
@@ -154,6 +260,14 @@ function isTriggerWord_(text) {
   });
 }
 
+function joinGreeting_() {
+  return (
+    'เชื่อมกลุ่มนี้เรียบร้อยแล้ว ✅\n' +
+    'กลุ่มนี้จะได้รับแจ้งเตือนการชำระเงินและการแก้ไข/ลบเกมด้วย\n\n' +
+    'พิมพ์ ' + triggerWords_().join(' หรือ ') + ' เพื่อดูยอดค้างชำระได้ทุกเมื่อ'
+  );
+}
+
 // Always answers ok:true — a non-200 makes LINE retry the delivery.
 function handleLineWebhook_(e, body) {
   if (!lineWebhookAuthorized_(e)) return { ok: true };
@@ -161,7 +275,20 @@ function handleLineWebhook_(e, body) {
   var events = body && body.events ? body.events : [];
   events.forEach(function (event) {
     try {
+      // Removed from the group, or blocked in a 1:1 — stop announcing there.
+      if (event.type === 'leave' || event.type === 'unfollow') {
+        forgetLineTarget_(lineSourceId_(event.source));
+        return;
+      }
+
       rememberLineTarget_(event.source);
+
+      // Added to a group: it is linked from this moment, without waiting for
+      // anyone to type. Say so, so nobody has to guess whether it worked.
+      if (event.type === 'join') {
+        lineReply_(event.replyToken, [{ type: 'text', text: joinGreeting_() }]);
+        return;
+      }
 
       if (
         event.type === 'message' &&
@@ -278,7 +405,9 @@ function setupSlips() {
 function getLineStatus() {
   return {
     configured: !!lineProp_(LINE_PROP.TOKEN) && !!lineProp_(LINE_PROP.WEBHOOK_TOKEN),
-    linked: !!lineTargetId_(),
+    linked: lineTargets_().length > 0,
+    // How many chats an announcement reaches. Ids stay server-side.
+    linked_count: lineTargets_().length,
     app_url_set: !!lineProp_(LINE_PROP.APP_URL),
     trigger_words: triggerWords_(),
     last_pushed_at: lineProp_(LINE_PROP.LAST_PUSHED_AT) || null,
@@ -298,14 +427,14 @@ function pushOutstandingToLine(payload) {
   }
 
   var list = getOutstanding();
-  linePush_(lineTargetId_(), [buildOutstandingFlex_(list, nowIso())]);
+  var groups = linePushAll_([buildOutstandingFlex_(list, nowIso())]);
 
   var props = {};
   props[LINE_PROP.LAST_PUSHED_AT] = nowIso();
   props[LINE_PROP.LAST_PUSHED_AT_MS] = String(now);
   lineProps_().setProperties(props);
 
-  return { sent: list.length };
+  return { sent: list.length, groups: groups };
 }
 
 // The web app's "ยืนยันว่าชำระแล้ว" button. Settles first, because the ledger is
@@ -381,7 +510,7 @@ function announcePayment_(player, amount, slipUrl, isCash) {
     messages.push({ type: 'image', originalContentUrl: slipUrl, previewImageUrl: slipUrl });
   }
   messages.push(buildOutstandingFlex_(getOutstanding(), nowIso()));
-  linePush_(lineTargetId_(), messages);
+  linePushAll_(messages);
 }
 
 // ---------------------------------------------------------------------------
@@ -400,12 +529,10 @@ function announcePayment_(player, amount, slipUrl, isCash) {
 // `after` is null for a delete. Silently does nothing until the bot is set up,
 // so a fresh install isn't nagged about LINE on every edit.
 function notifyGameChange_(kind, before, after) {
-  if (!lineProp_(LINE_PROP.TOKEN) || !lineTargetId_()) return null;
+  if (!lineProp_(LINE_PROP.TOKEN) || !lineTargets_().length) return null;
   try {
     var affected = affectedPlayers_(before, after);
-    linePush_(lineTargetId_(), [
-      buildGameChangeFlex_(kind, before, after, affected, nowIso()),
-    ]);
+    linePushAll_([buildGameChangeFlex_(kind, before, after, affected, nowIso())]);
     return null;
   } catch (err) {
     var warning =

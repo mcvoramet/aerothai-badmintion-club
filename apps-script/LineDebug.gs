@@ -45,7 +45,7 @@ function debugLineSetup() {
   var lines = [
     'CHANNEL_ACCESS_TOKEN: ' + (lineProp_(LINE_PROP.TOKEN) ? 'set' : 'MISSING'),
     'WEBHOOK_TOKEN: ' + (lineProp_(LINE_PROP.WEBHOOK_TOKEN) ? 'set' : 'MISSING — every webhook is dropped'),
-    'TARGET_ID: ' + (lineTargetId_() || 'MISSING'),
+    'linked chats: ' + (lineTargets_().length ? JSON.stringify(lineTargets_()) : 'MISSING'),
     'LINE_TRIGGER_WORD (raw): ' + (raw ? JSON.stringify(raw) : '(not set — falling back to default)'),
     'active trigger words: ' + JSON.stringify(triggerWords_()),
     'normalized: ' + JSON.stringify(triggerWords_().map(normalizeThai_)),
@@ -72,10 +72,49 @@ function debugTriggerMatch() {
 // works, the bot/token/group are all fine and the problem is upstream: the
 // webhook URL registered in the LINE console, or the trigger word itself.
 function debugPushNow() {
-  if (typeof linePush_ !== 'function') return debugWhichFilesArePresent();
+  if (typeof linePushAll_ !== 'function') return debugWhichFilesArePresent();
 
-  linePush_(lineTargetId_(), [buildOutstandingFlex_(getOutstanding(), nowIso())]);
-  return 'pushed';
+  var groups = linePushAll_([buildOutstandingFlex_(getOutstanding(), nowIso())]);
+  return 'pushed to ' + groups + ' chat(s)';
+}
+
+// Which chats get the slip / edit announcements, and what each one is.
+//
+// Ids beginning with C are groups, R multi-person rooms, U a single person —
+// a U in this list means the bot was messaged privately before it was ever
+// added to a group.
+function debugListTargets() {
+  if (typeof lineTargets_ !== 'function') return debugWhichFilesArePresent();
+
+  var targets = lineTargets_();
+  if (!targets.length) {
+    var empty = 'no chats linked — add the bot to a group, or say anything in one';
+    console.log(empty);
+    return empty;
+  }
+  var lines = targets.map(function (id, i) {
+    var kind = id.charAt(0) === 'C' ? 'group' : id.charAt(0) === 'R' ? 'room' : 'direct message';
+    return (i === 0 ? '* ' : '  ') + id + '   (' + kind + ')';
+  });
+  lines.unshift(targets.length + ' chat(s) receive announcements:');
+  console.log(lines.join('\n'));
+  return lines.join('\n');
+}
+
+// Unlink one chat by hand — for a group the bot is still in but shouldn't
+// announce to. Removing the bot from the group does this on its own.
+// Edit the id, run, read the log.
+function debugForgetTarget() {
+  if (typeof forgetLineTarget_ !== 'function') return debugWhichFilesArePresent();
+
+  var id = 'PASTE_THE_ID_FROM_debugListTargets_HERE';
+  if (lineTargets_().indexOf(id) === -1) {
+    var miss = 'not linked: ' + id + '\n' + debugListTargets();
+    console.log(miss);
+    return miss;
+  }
+  forgetLineTarget_(id);
+  return 'removed ' + id + '\n' + debugListTargets();
 }
 
 // The exact URL that must be registered as the webhook in the LINE console,

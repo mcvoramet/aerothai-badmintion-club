@@ -71,8 +71,10 @@ export interface Settings {
 export interface LineStatus {
   /** Channel access token + webhook secret are both set in Script Properties. */
   configured: boolean;
-  /** The bot has seen at least one event, so it knows which chat to push to. */
+  /** The bot has seen at least one event, so it knows which chats to push to. */
   linked: boolean;
+  /** How many chats an announcement reaches — the bot can be in several groups. */
+  linked_count: number;
   /** LINE_LIFF_URL is set, so the bubble can deep-link into the pay screen. */
   app_url_set: boolean;
   /** Typing any of these in the chat makes the bot post the list. */

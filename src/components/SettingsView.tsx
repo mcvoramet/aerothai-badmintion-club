@@ -321,7 +321,9 @@ function LineNotifyCard({ password }: { password: string }) {
             ? '⚠️ ยังไม่ได้ตั้งค่า — ใส่ LINE_CHANNEL_ACCESS_TOKEN และ LINE_WEBHOOK_TOKEN ใน Script Properties'
             : !status?.linked
               ? '⚠️ ยังไม่ได้เชื่อมกลุ่ม — เพิ่มบอทเข้ากลุ่มแล้วพิมพ์อะไรก็ได้ 1 ครั้ง'
-              : '✅ พร้อมส่ง'}
+              : status.linked_count > 1
+                ? `✅ พร้อมส่ง — เชื่อมอยู่ ${status.linked_count} กลุ่ม`
+                : '✅ พร้อมส่ง'}
         </p>
       )}
 
