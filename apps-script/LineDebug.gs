@@ -74,8 +74,31 @@ function debugTriggerMatch() {
 function debugPushNow() {
   if (typeof linePushAll_ !== 'function') return debugWhichFilesArePresent();
 
-  var groups = linePushAll_([buildOutstandingFlex_(getOutstanding(), nowIso())]);
-  return 'pushed to ' + groups + ' chat(s)';
+  var pushed = linePushAll_([buildOutstandingFlex_(getOutstanding(), nowIso())]);
+  var lines = ['pushed to ' + pushed.sent + ' of ' + pushed.total + ' chat(s)'];
+  pushed.failed.forEach(function (f) {
+    lines.push('FAILED ' + f.to + '  (' + f.code + ') ' + f.detail);
+  });
+  console.log(lines.join('\n'));
+  return lines.join('\n');
+}
+
+// Link a group by hand — for a group the bot joined before multi-group support
+// was deployed. Its one `join` event is long gone, so it only links itself when
+// someone types in it; this is the other way. The group id is in the
+// executions log of any webhook from that group (source.groupId, starts with C).
+// Edit the id, run, read the log.
+function debugAddTarget() {
+  if (typeof rememberLineTarget_ !== 'function') return debugWhichFilesArePresent();
+
+  var id = 'PASTE_THE_GROUP_ID_HERE';
+  if (!isGroupTarget_(id)) {
+    var bad = 'not a group id (should start with C or R): ' + id;
+    console.log(bad);
+    return bad;
+  }
+  rememberLineTarget_({ groupId: id });
+  return 'added ' + id + '\n' + debugListTargets();
 }
 
 // Which chats get the slip / edit announcements, and what each one is.

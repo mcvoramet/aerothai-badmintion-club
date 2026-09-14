@@ -282,6 +282,8 @@ function LineNotifyCard({ password }: { password: string }) {
     try {
       const result = await pushOutstandingToLine(password);
       setSent(result.sent);
+      // Some groups got it and some didn't — say which, rather than a clean success.
+      if (result.warning) setError(result.warning);
       setStatus(await getLineStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ส่งเข้ากลุ่ม LINE ไม่สำเร็จ');

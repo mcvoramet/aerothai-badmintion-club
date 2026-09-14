@@ -114,27 +114,49 @@ function lineSourceId_(source) {
 function rememberLineTarget_(source) {
   var id = lineSourceId_(source);
   if (!id) return;
+  // Cheap unlocked check first: nearly every event comes from a chat that is
+  // already linked, and those shouldn't queue behind a game save.
+  if (lineTargets_().indexOf(id) !== -1) return;
 
-  var targets = lineTargets_();
-  if (targets.indexOf(id) !== -1) return;
+  withLineTargetsLock_(function () {
+    var targets = lineTargets_();
+    if (targets.indexOf(id) !== -1) return;
 
-  if (isGroupTarget_(id)) {
-    saveLineTargets_(targets.filter(isGroupTarget_).concat([id]));
-    return;
-  }
-  if (targets.length) return;
-  saveLineTargets_([id]);
+    if (isGroupTarget_(id)) {
+      saveLineTargets_(targets.filter(isGroupTarget_).concat([id]));
+      return;
+    }
+    if (targets.length) return;
+    saveLineTargets_([id]);
+  });
 }
 
 // Removing the bot from a group must stop its announcements — otherwise the
 // test group keeps getting the club's slips forever.
 function forgetLineTarget_(id) {
   if (!id) return;
-  var targets = lineTargets_();
-  if (targets.indexOf(id) === -1) return;
-  saveLineTargets_(targets.filter(function (t) {
-    return t !== id;
-  }));
+  withLineTargetsLock_(function () {
+    var targets = lineTargets_();
+    if (targets.indexOf(id) === -1) return;
+    saveLineTargets_(targets.filter(function (t) {
+      return t !== id;
+    }));
+  });
+}
+
+// The target list is read-modify-write on a single property, and LINE delivers
+// webhooks from different chats as separate, concurrent requests. Without a
+// lock, the bot joining group B while someone types in group A lets A's write
+// land on top of B's — and B, having already had its one join event, silently
+// never gets another announcement.
+function withLineTargetsLock_(fn) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // Group ids start with C, multi-person room ids with R, users with U.
@@ -168,41 +190,56 @@ function lineApi_(path, payload) {
 // Each destination costs one message against the monthly quota, so the count
 // here is the number of groups, not one flat send.
 //
-// 403/404 is LINE's answer for "this bot can no longer post there" — the group
-// was deleted, or the bot was removed from it. Those ids are dropped rather
-// than retried forever; a group that comes back re-registers itself on the
-// next event from it. Any other failure (a bad token, a malformed message, a
-// LINE outage) is left alone: it is not the destination's fault, and forgetting
-// the group over it would unlink the club.
+// One chat failing never stops the others, and never unlinks it. Failed
+// pushes used to unlink the chat on 403/404, but LINE also answers 403 for
+// account-wide problems (the plan doesn't allow push, quota exhausted), which
+// wiped every group at once — and only whichever group spoke next came back.
+// Removal is left to the `leave` webhook and debugForgetTarget.
+//
+// Throws only when nothing was delivered. A partial failure comes back in
+// `failed` so the caller can say so; see linePushWarning_.
 function linePushAll_(messages) {
   var targets = lineTargets_();
   if (!targets.length) throw new Error(LINE_NOT_LINKED_MESSAGE);
 
   var sent = 0;
-  var stale = [];
-  var lastError = null;
+  var failed = [];
 
   targets.forEach(function (to) {
-    var res = lineFetch_('/message/push', { to: to, messages: messages });
-    var code = res.getResponseCode();
+    var code;
+    var detail;
+    try {
+      var res = lineFetch_('/message/push', { to: to, messages: messages });
+      code = res.getResponseCode();
+      detail = res.getContentText();
+    } catch (err) {
+      code = 0;
+      detail = err && err.message ? err.message : String(err);
+    }
     if (code >= 200 && code < 300) {
       sent++;
       return;
     }
-    if (code === 403 || code === 404) {
-      stale.push(to);
-      console.warn('LINE target ' + to + ' is gone (' + code + ') — unlinking it');
-      return;
-    }
-    lastError = new Error('LINE API ผิดพลาด (' + code + '): ' + res.getContentText());
+    console.error('LINE push to ' + to + ' failed (' + code + '): ' + detail);
+    failed.push({ to: to, code: code, detail: detail });
   });
 
-  stale.forEach(forgetLineTarget_);
-
   if (!sent) {
-    throw lastError || new Error(LINE_NOT_LINKED_MESSAGE);
+    throw new Error('LINE API ผิดพลาด (' + failed[0].code + '): ' + failed[0].detail);
   }
-  return sent;
+  return { sent: sent, total: targets.length, failed: failed };
+}
+
+// null when every chat got the push, otherwise a Thai sentence for the web app.
+function linePushWarning_(result) {
+  if (!result.failed.length) return null;
+  return (
+    'ส่งเข้ากลุ่ม LINE ไม่ครบ — สำเร็จ ' + result.sent + ' จาก ' + result.total + ' กลุ่ม (' +
+    result.failed.map(function (f) {
+      return f.code + ': ' + f.detail;
+    }).join('; ') +
+    ')'
+  );
 }
 
 // Replies land in whichever chat sent the message and, unlike pushes, don't
@@ -427,14 +464,14 @@ function pushOutstandingToLine(payload) {
   }
 
   var list = getOutstanding();
-  var groups = linePushAll_([buildOutstandingFlex_(list, nowIso())]);
+  var pushed = linePushAll_([buildOutstandingFlex_(list, nowIso())]);
 
   var props = {};
   props[LINE_PROP.LAST_PUSHED_AT] = nowIso();
   props[LINE_PROP.LAST_PUSHED_AT_MS] = String(now);
   lineProps_().setProperties(props);
 
-  return { sent: list.length, groups: groups };
+  return { sent: list.length, groups: pushed.sent, warning: linePushWarning_(pushed) };
 }
 
 // The web app's "ยืนยันว่าชำระแล้ว" button. Settles first, because the ledger is
@@ -462,7 +499,12 @@ function confirmPayment(payload) {
     if (!isCash) {
       slip = uploadSlip_(payload.slip_base64, payload.slip_mime_type, player.nickname);
     }
-    announcePayment_(player, result.amount_settled, slip ? slip.url : null, isCash);
+    // At least one group has the slip by now, so a partial failure keeps it.
+    var partial = announcePayment_(player, result.amount_settled, slip ? slip.url : null, isCash);
+    if (partial) {
+      warning = 'บันทึกการชำระเงินแล้ว แต่' + partial;
+      console.error(warning);
+    }
   } catch (err) {
     // Don't leave the slip behind if it never made it into the chat.
     if (slip) {
@@ -510,7 +552,7 @@ function announcePayment_(player, amount, slipUrl, isCash) {
     messages.push({ type: 'image', originalContentUrl: slipUrl, previewImageUrl: slipUrl });
   }
   messages.push(buildOutstandingFlex_(getOutstanding(), nowIso()));
-  linePushAll_(messages);
+  return linePushWarning_(linePushAll_(messages));
 }
 
 // ---------------------------------------------------------------------------
@@ -532,8 +574,14 @@ function notifyGameChange_(kind, before, after) {
   if (!lineProp_(LINE_PROP.TOKEN) || !lineTargets_().length) return null;
   try {
     var affected = affectedPlayers_(before, after);
-    linePushAll_([buildGameChangeFlex_(kind, before, after, affected, nowIso())]);
-    return null;
+    var partial = linePushWarning_(
+      linePushAll_([buildGameChangeFlex_(kind, before, after, affected, nowIso())])
+    );
+    if (partial) {
+      partial = (kind === 'delete' ? 'ลบเกมแล้ว แต่' : 'บันทึกการแก้ไขแล้ว แต่') + partial;
+      console.error(partial);
+    }
+    return partial;
   } catch (err) {
     var warning =
       (kind === 'delete' ? 'ลบเกมแล้ว' : 'บันทึกการแก้ไขแล้ว') +

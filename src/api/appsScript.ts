@@ -177,6 +177,15 @@ export function confirmPayment(payload: {
  * Message. Password-gated server-side: unlike settlePlayer this is
  * outward-facing, so a leaked /exec URL shouldn't let anyone spam the group.
  */
-export function pushOutstandingToLine(password: string): Promise<{ sent: number }> {
-  return apiPost<{ sent: number }>('pushOutstandingToLine', { password });
+export interface LinePushResult {
+  /** How many people were on the list. */
+  sent: number;
+  /** How many linked chats actually received it. */
+  groups: number;
+  /** Set when some chats got it and others didn't. */
+  warning: string | null;
+}
+
+export function pushOutstandingToLine(password: string): Promise<LinePushResult> {
+  return apiPost<LinePushResult>('pushOutstandingToLine', { password });
 }
