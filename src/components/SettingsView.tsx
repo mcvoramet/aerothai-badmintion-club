@@ -325,6 +325,13 @@ function LineNotifyCard({ password }: { password: string }) {
         </p>
       ) : null}
 
+      {status?.edit_trigger_words?.length ? (
+        <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
+          พิมพ์ <TriggerWords words={status.edit_trigger_words} /> เพื่อดูการแก้ไข/ลบเกม 3
+          ครั้งล่าสุด ว่าอะไรเปลี่ยนและยอดของใครเปลี่ยนบ้าง
+        </p>
+      ) : null}
+
       {status && (
         <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
           {status.weekly_summary_scheduled

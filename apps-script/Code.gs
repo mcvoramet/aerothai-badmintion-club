@@ -155,6 +155,7 @@ function setupSheets() {
     'slip_url',
   ]);
   createSheetIfMissing_(ss, SHEET_NAMES.SETTINGS, ['key', 'value', 'updated_at']);
+  createSheetIfMissing_(ss, SHEET_NAMES.GAME_EDITS, GAME_EDITS_HEADERS);
 
   // Sheets that predate the LINE feature already exist, so createSheetIfMissing_
   // leaves their headers alone. Append the audit columns to them here.

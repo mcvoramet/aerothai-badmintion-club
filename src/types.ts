@@ -71,6 +71,8 @@ export interface LineStatus {
   trigger_words: string[];
   /** Typing any of these makes the bot post the last 7 days of payments. */
   history_trigger_words: string[];
+  /** Typing any of these makes the bot post the 3 latest game edits/deletes. */
+  edit_trigger_words: string[];
   /** The Monday 09:00 summary trigger is installed (setupWeeklySummary). */
   weekly_summary_scheduled: boolean;
   weekly_sent_at: string | null;

@@ -3,7 +3,10 @@ var SHEET_NAMES = {
   GAMES: 'Games',
   SETTLEMENTS: 'Settlements',
   SETTINGS: 'Settings',
+  GAME_EDITS: 'GameEdits',
 };
+
+var GAME_EDITS_HEADERS = ['edit_id', 'game_id', 'kind', 'changed_at', 'before_json', 'after_json'];
 
 function getSheet(name) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();

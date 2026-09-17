@@ -199,10 +199,40 @@ function editGame(payload) {
       row[slot + '_department'] =
         i < keys.length ? String(payload.players[i].department).trim() : '';
     }
+    // Snapshot the old shape before it's overwritten — the edit history is a
+    // diff, so it needs both sides.
+    var before = rowToGame_(existing);
     updateObjectRow(sheet, existing.__row, row);
-    return rowToGame_(row);
+    var after = rowToGame_(row);
+    logGameChange_('edit', before, after, ts);
+    return after;
   } finally {
     lock.releaseLock();
+  }
+}
+
+// Appends one row to GameEdits, the only record of what a game looked like
+// before it was changed — the Games row itself is overwritten in place. Read
+// back by getRecentGameChanges_ for the LINE edit-history reply.
+//
+// Called inside the caller's lock, right after the write. A failure here is
+// logged and swallowed: the edit already happened, and losing one history
+// entry is better than reporting a finished save as failed.
+function logGameChange_(kind, before, after, changedAt) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    // Created on first use, so an existing install doesn't need setupSheets.
+    createSheetIfMissing_(ss, SHEET_NAMES.GAME_EDITS, GAME_EDITS_HEADERS);
+    appendObjectRow(ss.getSheetByName(SHEET_NAMES.GAME_EDITS), {
+      edit_id: makeId('E'),
+      game_id: before.game_id,
+      kind: kind,
+      changed_at: changedAt,
+      before_json: JSON.stringify(before),
+      after_json: after ? JSON.stringify(after) : '',
+    });
+  } catch (err) {
+    console.error('game change log failed: ' + (err && err.message ? err.message : err));
   }
 }
 
@@ -217,6 +247,7 @@ function deleteGame(payload) {
     if (!isDeleted_(existing.deleted)) {
       var col = headerIndex_(sheet, 'deleted') + 1;
       sheet.getRange(existing.__row, col).setValue(true);
+      logGameChange_('delete', rowToGame_(existing), null, nowIso());
     }
     return { game_id: payload.game_id, deleted: true };
   } finally {

@@ -12,6 +12,7 @@
 // Everything else is a reply, which is free:
 //   - the owed list, when someone types LINE_TRIGGER_WORD
 //   - the payment history, when someone types LINE_HISTORY_TRIGGER_WORD
+//   - the latest game edits/deletes, when someone types LINE_EDIT_TRIGGER_WORD
 // Payments and game edits are deliberately not announced as they happen; they
 // show up in the next weekly summary instead.
 //
@@ -25,6 +26,7 @@ var LINE_PROP = {
   APP_URL: 'LINE_LIFF_URL',
   TRIGGER_WORD: 'LINE_TRIGGER_WORD',
   HISTORY_TRIGGER_WORD: 'LINE_HISTORY_TRIGGER_WORD',
+  EDIT_TRIGGER_WORD: 'LINE_EDIT_TRIGGER_WORD',
   SLIP_FOLDER_ID: 'LINE_SLIP_FOLDER_ID',
   LAST_PUSHED_AT: 'LINE_LAST_PUSHED_AT',
   LAST_PUSHED_AT_MS: 'LINE_LAST_PUSHED_AT_MS',
@@ -38,6 +40,9 @@ var LINE_NOT_LINKED_MESSAGE = 'ยังไม่ได้เชื่อมก�
 // The payment history covers a rolling window rather than "since Monday", so
 // the Monday summary and someone asking on a Thursday both see a full week.
 var PAID_HISTORY_DAYS = 7;
+
+// How many game edits/deletes the edit-history reply shows, newest first.
+var GAME_CHANGES_SHOWN = 3;
 
 var WEEKLY_SUMMARY_HANDLER = 'sendWeeklyLineSummary';
 var WEEKLY_SUMMARY_TZ = 'Asia/Bangkok';
@@ -271,11 +276,12 @@ function lineWebhookAuthorized_(e) {
   return got === expected;
 }
 
-// Typing any of these in the chat makes the bot reply with the owed list, or
-// with the payment history. The matching properties override them and accept
-// a comma-separated list.
+// Typing any of these in the chat makes the bot reply with the owed list, the
+// payment history, or the latest game edits. The matching properties override
+// them and accept a comma-separated list.
 var LINE_TRIGGER_WORD = 'ยอดค้างชำระ';
 var LINE_HISTORY_TRIGGER_WORD = 'ดูประวัติการจ่ายเงิน';
+var LINE_EDIT_TRIGGER_WORD = 'ดูประวัติการแก้ไข';
 
 // Thai has two encodings for SARA AM: the precomposed U+0E33 (ำ) that phone
 // keyboards produce, and the decomposed NIKHAHIT + SARA AA (U+0E4D U+0E32) that
@@ -308,6 +314,10 @@ function historyTriggerWords_() {
   return configuredWords_(LINE_PROP.HISTORY_TRIGGER_WORD, LINE_HISTORY_TRIGGER_WORD);
 }
 
+function editTriggerWords_() {
+  return configuredWords_(LINE_PROP.EDIT_TRIGGER_WORD, LINE_EDIT_TRIGGER_WORD);
+}
+
 function matchesWord_(text, words) {
   var actual = normalizeThai_(text);
   if (!actual) return false;
@@ -324,12 +334,18 @@ function isHistoryTriggerWord_(text) {
   return matchesWord_(text, historyTriggerWords_());
 }
 
+function isEditTriggerWord_(text) {
+  return matchesWord_(text, editTriggerWords_());
+}
+
 function joinGreeting_() {
   return (
     'เชื่อมกลุ่มนี้เรียบร้อยแล้ว ✅\n' +
     'ทุกวันจันทร์ 09:00 บอทจะสรุปรายชื่อคนค้างชำระ และรายชื่อคนที่จ่ายแล้วใน 7 วันที่ผ่านมาให้\n\n' +
     'พิมพ์ ' + triggerWords_().join(' หรือ ') + ' เพื่อดูยอดค้างชำระ\n' +
-    'พิมพ์ ' + historyTriggerWords_().join(' หรือ ') + ' เพื่อดูประวัติการจ่ายเงิน'
+    'พิมพ์ ' + historyTriggerWords_().join(' หรือ ') + ' เพื่อดูประวัติการจ่ายเงิน\n' +
+    'พิมพ์ ' + editTriggerWords_().join(' หรือ ') + ' เพื่อดูการแก้ไข/ลบเกม ' +
+    GAME_CHANGES_SHOWN + ' ครั้งล่าสุด'
   );
 }
 
@@ -357,9 +373,11 @@ function handleLineWebhook_(e, body) {
 
       if (event.type !== 'message' || !event.message || event.message.type !== 'text') return;
       var text = event.message.text;
-      // History first, so a custom owed-list word can't shadow it.
+      // History words first, so a custom owed-list word can't shadow them.
       if (isHistoryTriggerWord_(text)) {
         lineReply_(event.replyToken, [buildPaidHistoryFlex_(getRecentPayments_(), nowIso())]);
+      } else if (isEditTriggerWord_(text)) {
+        lineReply_(event.replyToken, [buildRecentGameChangesFlex_()]);
       } else if (isTriggerWord_(text)) {
         lineReply_(event.replyToken, [buildOutstandingFlex_(getOutstanding(), nowIso())]);
       }
@@ -401,6 +419,93 @@ function getRecentPayments_() {
       p.timestamp = p.timestamp.toISOString();
       return p;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Game edit history
+// ---------------------------------------------------------------------------
+
+// The latest GAME_CHANGES_SHOWN edits/deletes from GameEdits, newest first.
+// Rows are appended in time order, so the newest are at the bottom. A row
+// whose JSON can't be read (edited by hand) is skipped rather than failing
+// the whole reply.
+function getRecentGameChanges_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_NAMES.GAME_EDITS);
+  if (!sheet) return [];
+  var rows = readSheetAsObjects(sheet);
+  var changes = [];
+  for (var i = rows.length - 1; i >= 0 && changes.length < GAME_CHANGES_SHOWN; i--) {
+    var r = rows[i];
+    try {
+      changes.push({
+        kind: r.kind === 'delete' ? 'delete' : 'edit',
+        changed_at: new Date(r.changed_at).toISOString(),
+        before: JSON.parse(r.before_json),
+        after: r.after_json ? JSON.parse(r.after_json) : null,
+      });
+    } catch (err) {
+      console.error('skipping unreadable GameEdits row ' + r.__row + ': ' + err);
+    }
+  }
+  return changes;
+}
+
+// Everyone a change touched: whoever was in the game before, whoever is in it
+// after, or both. `was`/`now` are what that person owed for the game on each
+// side — two shares if they held two slots — and null when they weren't in it,
+// which is what makes an added or removed player readable at a glance.
+//
+// `balances` is everyone's current balance by player_key, read once for all
+// the cards in a reply.
+function affectedPlayers_(before, after, balances) {
+  var index = {};
+  var order = [];
+  function slotFor(player) {
+    var entry = index[player.player_key];
+    if (!entry) {
+      entry = {
+        player_key: player.player_key,
+        nickname: player.nickname,
+        department: player.department,
+        was: null,
+        now: null,
+        balance: round2_(balances[player.player_key] || 0),
+      };
+      index[player.player_key] = entry;
+      order.push(entry);
+    }
+    return entry;
+  }
+
+  // Added up per slot, not per person: somebody covering two shares of the
+  // game should see both of them in the number next to their name.
+  before.players.forEach(function (p) {
+    var entry = slotFor(p);
+    entry.was = round2_((entry.was || 0) + Number(before.cost_per_player));
+  });
+  if (after) {
+    after.players.forEach(function (p) {
+      var entry = slotFor(p);
+      entry.now = round2_((entry.now || 0) + Number(after.cost_per_player));
+    });
+  }
+  return order;
+}
+
+function buildRecentGameChangesFlex_() {
+  var changes = getRecentGameChanges_();
+  var balances = {};
+  if (changes.length) {
+    getOutstanding().forEach(function (p) {
+      balances[p.player_key] = p.balance;
+    });
+  }
+  return buildGameChangesFlex_(
+    changes,
+    changes.map(function (c) {
+      return affectedPlayers_(c.before, c.after, balances);
+    })
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +649,7 @@ function getLineStatus() {
     app_url_set: !!lineProp_(LINE_PROP.APP_URL),
     trigger_words: triggerWords_(),
     history_trigger_words: historyTriggerWords_(),
+    edit_trigger_words: editTriggerWords_(),
     weekly_summary_scheduled: weeklySummaryScheduled_(),
     weekly_sent_at: lineProp_(LINE_PROP.WEEKLY_SENT_AT) || null,
     last_pushed_at: lineProp_(LINE_PROP.LAST_PUSHED_AT) || null,
