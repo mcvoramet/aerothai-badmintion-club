@@ -251,6 +251,15 @@ function SettingsForm({ password, onLock }: { password: string; onLock: () => vo
   );
 }
 
+function TriggerWords({ words }: { words: string[] }) {
+  return words.map((word, i) => (
+    <span key={word}>
+      {i > 0 && ' หรือ '}
+      <code className="line-trigger">{word}</code>
+    </span>
+  ));
+}
+
 function LineNotifyCard({ password }: { password: string }) {
   const [status, setStatus] = useState<LineStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -304,16 +313,27 @@ function LineNotifyCard({ password }: { password: string }) {
 
       {status?.trigger_words?.length ? (
         <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
-          หรือพิมพ์{' '}
-          {status.trigger_words.map((word, i) => (
-            <span key={word}>
-              {i > 0 && ' หรือ '}
-              <code className="line-trigger">{word}</code>
-            </span>
-          ))}{' '}
-          ในกลุ่ม LINE บอทก็จะส่งรายการให้ทันที
+          หรือพิมพ์ <TriggerWords words={status.trigger_words} /> ในกลุ่ม LINE
+          บอทก็จะส่งรายการให้ทันที (ไม่เสียโควตาข้อความ)
         </p>
       ) : null}
+
+      {status?.history_trigger_words?.length ? (
+        <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
+          พิมพ์ <TriggerWords words={status.history_trigger_words} /> เพื่อดูว่าใครจ่ายแล้วบ้างใน 7
+          วันล่าสุด แตะชื่อเพื่อเปิดดูสลิปได้
+        </p>
+      ) : null}
+
+      {status && (
+        <p className="balance-label" style={{ marginBottom: '0.6rem' }}>
+          {status.weekly_summary_scheduled
+            ? '🗓️ ส่งสรุปอัตโนมัติทุกวันจันทร์ 09:00 (รายชื่อค้างชำระ + ประวัติการจ่าย 7 วัน)'
+            : '⚠️ ยังไม่ได้ตั้งสรุปรายสัปดาห์ — รันฟังก์ชัน setupWeeklySummary ใน Apps Script editor 1 ครั้ง'}
+          {status.weekly_sent_at &&
+            ` · ส่งล่าสุด ${new Date(status.weekly_sent_at).toLocaleString('th-TH')}`}
+        </p>
+      )}
 
       {loading ? (
         <p className="balance-label">กำลังตรวจสอบสถานะ...</p>

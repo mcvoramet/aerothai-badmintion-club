@@ -184,7 +184,12 @@ function getOutstanding() {
     });
 }
 
-function settlePlayer(payload) {
+// `internal` is only ever passed by server-side callers (confirmPayment), never
+// from a web request: settlePlayer is also a public action, and a slip link
+// taken from the request body would let anyone plant any URL in the history
+// the bot posts to the group.
+function settlePlayer(payload, internal) {
+  var extra = internal || {};
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
@@ -207,6 +212,7 @@ function settlePlayer(payload) {
       source: payload.source === 'line' ? 'line' : 'app',
       line_user_id: payload.line_user_id ? String(payload.line_user_id) : '',
       method: payload.method === 'cash' ? 'cash' : 'transfer',
+      slip_url: extra.slip_url ? String(extra.slip_url) : '',
     });
     return {
       player_key: player.player_key,

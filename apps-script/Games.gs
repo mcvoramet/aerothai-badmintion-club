@@ -117,34 +117,6 @@ function getGamesInRange(payload) {
     });
 }
 
-// Tells the LINE group what changed, and swallows anything that goes wrong.
-//
-// This runs after the sheet has already been written, so a failure here is
-// never a failure of the save — it comes back as a warning the app shows next
-// to the change. notifyGameChange_ guards its own network calls, but it lives
-// in Line.gs, and an Apps Script project holding an older copy of that file
-// doesn't have it at all: calling a function that isn't there would otherwise
-// throw straight through the write path and make a finished delete look like
-// it failed.
-function announceGameChange_(kind, before, after) {
-  var saved = kind === 'delete' ? 'ลบเกมแล้ว' : 'บันทึกการแก้ไขแล้ว';
-  if (typeof notifyGameChange_ !== 'function') {
-    return (
-      saved +
-      ' แต่ยังไม่ได้แจ้งกลุ่ม LINE: ไฟล์ Line.gs ใน Apps Script ยังไม่ใช่เวอร์ชันล่าสุด' +
-      ' — คัดลอก Line.gs และ LineFlex.gs ใหม่ แล้ว Deploy → Manage deployments → New version'
-    );
-  }
-  try {
-    return notifyGameChange_(kind, before, after);
-  } catch (err) {
-    var warning =
-      saved + ' แต่แจ้งเข้ากลุ่ม LINE ไม่สำเร็จ: ' + (err && err.message ? err.message : err);
-    console.error(warning);
-    return warning;
-  }
-}
-
 function addGame(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -189,7 +161,6 @@ function addGame(payload) {
 function editGame(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var before, after;
   try {
     if (!payload || !payload.game_id) throw new Error('ต้องระบุ game_id');
     var shuttles = validateGamePayload_(payload);
@@ -228,44 +199,27 @@ function editGame(payload) {
       row[slot + '_department'] =
         i < keys.length ? String(payload.players[i].department).trim() : '';
     }
-    // Snapshot the old shape before it's overwritten — the LINE announcement is
-    // a diff, so it needs both sides.
-    before = rowToGame_(existing);
     updateObjectRow(sheet, existing.__row, row);
-    after = rowToGame_(row);
+    return rowToGame_(row);
   } finally {
     lock.releaseLock();
   }
-
-  // Announced outside the lock: a LINE round trip takes seconds, and nobody
-  // else should wait on the chat to save their own game.
-  after.line_warning = announceGameChange_('edit', before, after);
-  return after;
 }
 
+// Idempotent: deleting an already-deleted game succeeds without touching it.
 function deleteGame(payload) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
-  var before;
   try {
     if (!payload || !payload.game_id) throw new Error('ต้องระบุ game_id');
     var sheet = getSheet(SHEET_NAMES.GAMES);
     var existing = findGameRow_(sheet, payload.game_id);
-    // Deleting stays idempotent, but a second delete must not announce again —
-    // the ledger didn't change, so there is nothing to tell the group.
-    if (isDeleted_(existing.deleted)) {
-      return { game_id: payload.game_id, deleted: true, line_warning: null };
+    if (!isDeleted_(existing.deleted)) {
+      var col = headerIndex_(sheet, 'deleted') + 1;
+      sheet.getRange(existing.__row, col).setValue(true);
     }
-    before = rowToGame_(existing);
-    var col = headerIndex_(sheet, 'deleted') + 1;
-    sheet.getRange(existing.__row, col).setValue(true);
+    return { game_id: payload.game_id, deleted: true };
   } finally {
     lock.releaseLock();
   }
-
-  return {
-    game_id: payload.game_id,
-    deleted: true,
-    line_warning: announceGameChange_('delete', before, null),
-  };
 }

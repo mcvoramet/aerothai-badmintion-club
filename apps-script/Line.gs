@@ -4,13 +4,17 @@
 // is a public unauthenticated GET, so anything in that sheet is one bug away
 // from being world-readable.
 //
-// The bot posts four kinds of message:
-//   - the outstanding list, pushed from the web app's Settings tab
-//   - the same list, replied when someone types the trigger word in the chat
-//   - a "ยืนยันชำระแล้ว" announcement with the payer's slip, pushed when
-//     someone confirms a payment in the web app
-//   - an edit/delete notice for a recorded game, showing what changed and what
-//     each player in it now owes
+// A push to a group costs one message per member against the monthly quota,
+// so the bot pushes as little as possible:
+//   - a weekly summary, Monday 09:00 (Bangkok): who still owes, and who paid in
+//     the last 7 days with a link to each slip — one push, two cards
+//   - the owed list, pushed on demand from the web app's Settings tab
+// Everything else is a reply, which is free:
+//   - the owed list, when someone types LINE_TRIGGER_WORD
+//   - the payment history, when someone types LINE_HISTORY_TRIGGER_WORD
+// Payments and game edits are deliberately not announced as they happen; they
+// show up in the next weekly summary instead.
+//
 // Settling always happens in the web app, never in the chat, so the webhook
 // only ever reads messages — it never changes the ledger.
 var LINE_PROP = {
@@ -20,19 +24,27 @@ var LINE_PROP = {
   TARGET_IDS: 'LINE_TARGET_IDS',
   APP_URL: 'LINE_LIFF_URL',
   TRIGGER_WORD: 'LINE_TRIGGER_WORD',
+  HISTORY_TRIGGER_WORD: 'LINE_HISTORY_TRIGGER_WORD',
   SLIP_FOLDER_ID: 'LINE_SLIP_FOLDER_ID',
   LAST_PUSHED_AT: 'LINE_LAST_PUSHED_AT',
   LAST_PUSHED_AT_MS: 'LINE_LAST_PUSHED_AT_MS',
+  WEEKLY_SENT_AT: 'LINE_WEEKLY_SENT_AT',
 };
 
 var LINE_API_BASE = 'https://api.line.me/v2/bot';
 var LINE_PUSH_COOLDOWN_MS = 30000;
 var LINE_NOT_LINKED_MESSAGE = 'ยังไม่ได้เชื่อมกลุ่ม LINE — เพิ่มบอทเข้ากลุ่ม';
 
-// Slips are relayed, not archived. LINE copies the image onto its own CDN when
-// the message is sent, so the chat keeps showing it long after the file is gone.
-var SLIP_FOLDER_NAME = 'AeroThai Badminton — slips (ชั่วคราว)';
-var SLIP_RETENTION_MS = 60 * 60 * 1000;
+// The payment history covers a rolling window rather than "since Monday", so
+// the Monday summary and someone asking on a Thursday both see a full week.
+var PAID_HISTORY_DAYS = 7;
+
+var WEEKLY_SUMMARY_HANDLER = 'sendWeeklyLineSummary';
+var WEEKLY_SUMMARY_TZ = 'Asia/Bangkok';
+
+// Slips are the proof behind each payment, linked from the payment history, so
+// they are kept for good.
+var SLIP_FOLDER_NAME = 'AeroThai Badminton — slips';
 var SLIP_MAX_BYTES = 8 * 1024 * 1024;
 
 function lineProps_() {
@@ -49,10 +61,9 @@ function lineToken_() {
   return token;
 }
 
-// Every chat the bot pushes to. Replies (the trigger word) go back to whoever
-// asked and need none of this; pushes — the slip announcement, the edit/delete
-// notice, the button in Settings — have to name a destination, and there is
-// more than one club group.
+// Every chat the bot pushes to. Replies (the trigger words) go back to whoever
+// asked and need none of this; pushes — the weekly summary and the button in
+// Settings — have to name a destination, and there can be more than one group.
 //
 // Stored as a JSON array in LINE_TARGET_IDS. LINE_TARGET_ID is kept in sync
 // with the first entry so the older single-target property still reads true
@@ -132,7 +143,7 @@ function rememberLineTarget_(source) {
 }
 
 // Removing the bot from a group must stop its announcements — otherwise the
-// test group keeps getting the club's slips forever.
+// test group keeps getting the club's summaries forever.
 function forgetLineTarget_(id) {
   if (!id) return;
   withLineTargetsLock_(function () {
@@ -183,18 +194,16 @@ function lineApi_(path, payload) {
   return res.getContentText();
 }
 
-// Sends the same messages to every linked chat. This is what makes an
-// announcement reach the group the bot was just added to instead of only the
-// one it saw first.
+// Sends the same messages to every linked chat.
 //
-// Each destination costs one message against the monthly quota, so the count
-// here is the number of groups, not one flat send.
+// Each destination costs one message per member against the monthly quota,
+// however many message objects are in the request — so the weekly summary's
+// two cards go in one call, not two.
 //
-// One chat failing never stops the others, and never unlinks it. Failed
-// pushes used to unlink the chat on 403/404, but LINE also answers 403 for
-// account-wide problems (the plan doesn't allow push, quota exhausted), which
-// wiped every group at once — and only whichever group spoke next came back.
-// Removal is left to the `leave` webhook and debugForgetTarget.
+// One chat failing never stops the others, and never unlinks it: LINE also
+// answers 403 for account-wide problems (the plan doesn't allow push, quota
+// exhausted), and unlinking on that would wipe every group at once. Removal is
+// left to the `leave` webhook and debugForgetTarget.
 //
 // Throws only when nothing was delivered. A partial failure comes back in
 // `failed` so the caller can say so; see linePushWarning_.
@@ -249,7 +258,7 @@ function lineReply_(replyToken, messages) {
 }
 
 // ---------------------------------------------------------------------------
-// Webhook — only to learn the target chat
+// Webhook — learns the target chats and answers the trigger words
 // ---------------------------------------------------------------------------
 
 // Apps Script's doPost(e) exposes no request headers, so LINE's X-Line-Signature
@@ -262,9 +271,11 @@ function lineWebhookAuthorized_(e) {
   return got === expected;
 }
 
-// Typing any of these in the chat makes the bot post the current list.
-// LINE_TRIGGER_WORD overrides it and accepts a comma-separated list.
+// Typing any of these in the chat makes the bot reply with the owed list, or
+// with the payment history. The matching properties override them and accept
+// a comma-separated list.
 var LINE_TRIGGER_WORD = 'ยอดค้างชำระ';
+var LINE_HISTORY_TRIGGER_WORD = 'ดูประวัติการจ่ายเงิน';
 
 // Thai has two encodings for SARA AM: the precomposed U+0E33 (ำ) that phone
 // keyboards produce, and the decomposed NIKHAHIT + SARA AA (U+0E4D U+0E32) that
@@ -273,35 +284,52 @@ var LINE_TRIGGER_WORD = 'ยอดค้างชำระ';
 function normalizeThai_(text) {
   return String(text || '')
     .replace(/ํา/g, 'ำ')
-    .replace(/[\s ]+/g, '')
+    .replace(/[\s ]+/g, '')
     .replace(/[?!.？！。]+$/, '');
 }
 
 // The raw words as configured, for display. Comma-separated, either the ASCII
 // comma or the fullwidth one that Thai/Japanese keyboards can produce.
-function triggerWords_() {
-  var raw = lineProp_(LINE_PROP.TRIGGER_WORD) || LINE_TRIGGER_WORD;
+function configuredWords_(propKey, fallback) {
+  var raw = lineProp_(propKey) || fallback;
   var words = raw.split(/[,，]/).map(function (w) {
     return w.trim();
   }).filter(function (w) {
     return w.length > 0;
   });
-  return words.length ? words : [LINE_TRIGGER_WORD];
+  return words.length ? words : [fallback];
+}
+
+function triggerWords_() {
+  return configuredWords_(LINE_PROP.TRIGGER_WORD, LINE_TRIGGER_WORD);
+}
+
+function historyTriggerWords_() {
+  return configuredWords_(LINE_PROP.HISTORY_TRIGGER_WORD, LINE_HISTORY_TRIGGER_WORD);
+}
+
+function matchesWord_(text, words) {
+  var actual = normalizeThai_(text);
+  if (!actual) return false;
+  return words.some(function (w) {
+    return normalizeThai_(w) === actual;
+  });
 }
 
 function isTriggerWord_(text) {
-  var actual = normalizeThai_(text);
-  if (!actual) return false;
-  return triggerWords_().some(function (w) {
-    return normalizeThai_(w) === actual;
-  });
+  return matchesWord_(text, triggerWords_());
+}
+
+function isHistoryTriggerWord_(text) {
+  return matchesWord_(text, historyTriggerWords_());
 }
 
 function joinGreeting_() {
   return (
     'เชื่อมกลุ่มนี้เรียบร้อยแล้ว ✅\n' +
-    'กลุ่มนี้จะได้รับแจ้งเตือนการชำระเงินและการแก้ไข/ลบเกมด้วย\n\n' +
-    'พิมพ์ ' + triggerWords_().join(' หรือ ') + ' เพื่อดูยอดค้างชำระได้ทุกเมื่อ'
+    'ทุกวันจันทร์ 09:00 บอทจะสรุปรายชื่อคนค้างชำระ และรายชื่อคนที่จ่ายแล้วใน 7 วันที่ผ่านมาให้\n\n' +
+    'พิมพ์ ' + triggerWords_().join(' หรือ ') + ' เพื่อดูยอดค้างชำระ\n' +
+    'พิมพ์ ' + historyTriggerWords_().join(' หรือ ') + ' เพื่อดูประวัติการจ่ายเงิน'
   );
 }
 
@@ -327,12 +355,12 @@ function handleLineWebhook_(e, body) {
         return;
       }
 
-      if (
-        event.type === 'message' &&
-        event.message &&
-        event.message.type === 'text' &&
-        isTriggerWord_(event.message.text)
-      ) {
+      if (event.type !== 'message' || !event.message || event.message.type !== 'text') return;
+      var text = event.message.text;
+      // History first, so a custom owed-list word can't shadow it.
+      if (isHistoryTriggerWord_(text)) {
+        lineReply_(event.replyToken, [buildPaidHistoryFlex_(getRecentPayments_(), nowIso())]);
+      } else if (isTriggerWord_(text)) {
         lineReply_(event.replyToken, [buildOutstandingFlex_(getOutstanding(), nowIso())]);
       }
     } catch (err) {
@@ -341,6 +369,104 @@ function handleLineWebhook_(e, body) {
   });
 
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Payment history
+// ---------------------------------------------------------------------------
+
+// Everyone who paid in the last PAID_HISTORY_DAYS, newest first. Payments
+// recorded before slips were kept have no slip_url, and cash never has one.
+function getRecentPayments_() {
+  var since = Date.now() - PAID_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  return readSheetAsObjects(getSheet(SHEET_NAMES.SETTLEMENTS))
+    .map(function (r) {
+      return {
+        nickname: String(r.nickname || ''),
+        department: String(r.department || ''),
+        amount: Number(r.amount) || 0,
+        timestamp: new Date(r.timestamp),
+        method: r.method === 'cash' ? 'cash' : 'transfer',
+        slip_url: String(r.slip_url || ''),
+      };
+    })
+    .filter(function (p) {
+      var t = p.timestamp.getTime();
+      return isFinite(t) && t >= since;
+    })
+    .sort(function (a, b) {
+      return b.timestamp - a.timestamp;
+    })
+    .map(function (p) {
+      p.timestamp = p.timestamp.toISOString();
+      return p;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Weekly summary
+// ---------------------------------------------------------------------------
+
+// Run by the Monday trigger (see setupWeeklySummary), and safe to run by hand
+// from the editor to send one now. Both cards go in a single push, so a week
+// costs one message per group member, not two.
+//
+// Throws when nothing was delivered — Apps Script then emails the owner about
+// the failed trigger, which is the only place anyone would notice.
+function sendWeeklyLineSummary() {
+  var stamp = nowIso();
+  var pushed = linePushAll_([
+    buildOutstandingFlex_(getOutstanding(), stamp),
+    buildPaidHistoryFlex_(getRecentPayments_(), stamp),
+  ]);
+  lineProps_().setProperty(LINE_PROP.WEEKLY_SENT_AT, stamp);
+
+  var result = 'weekly summary pushed to ' + pushed.sent + ' of ' + pushed.total + ' chat(s)';
+  var warning = linePushWarning_(pushed);
+  if (warning) {
+    console.error(warning);
+    result += '\n' + warning;
+  } else {
+    console.log(result);
+  }
+  return result;
+}
+
+// Run once from the editor. Replaces any earlier copy of the trigger, so
+// running it twice doesn't send the summary twice.
+//
+// Google fires time-driven triggers somewhere within about 15 minutes of the
+// requested time, so the summary lands between roughly 09:00 and 09:15.
+function setupWeeklySummary() {
+  removeTriggers_(WEEKLY_SUMMARY_HANDLER);
+  ScriptApp.newTrigger(WEEKLY_SUMMARY_HANDLER)
+    .timeBased()
+    .onWeekDay(ScriptApp.WeekDay.MONDAY)
+    .atHour(9)
+    .nearMinute(0)
+    .inTimezone(WEEKLY_SUMMARY_TZ)
+    .create();
+
+  var message = 'ตั้งส่งสรุปเข้ากลุ่ม LINE ทุกวันจันทร์ 09:00 (' + WEEKLY_SUMMARY_TZ + ') แล้ว';
+  console.log(message);
+  return message;
+}
+
+function weeklySummaryScheduled_() {
+  try {
+    return ScriptApp.getProjectTriggers().some(function (t) {
+      return t.getHandlerFunction() === WEEKLY_SUMMARY_HANDLER;
+    });
+  } catch (err) {
+    // No trigger scope in this execution — report unknown as not scheduled.
+    return false;
+  }
+}
+
+function removeTriggers_(handler) {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === handler) ScriptApp.deleteTrigger(t);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -361,9 +487,9 @@ function slipFolder_() {
   return folder;
 }
 
-// LINE will not accept image bytes in a push: it needs a public https URL it can
-// fetch. Drive is the only host already on this stack, so the slip lands there
-// just long enough to be delivered, then deleteExpiredSlips_ removes it.
+// The slip is shared as "anyone with the link can view" so a tap on the name
+// in the LINE history opens it without a Google sign-in. The link is only ever
+// posted into the club's own group.
 function uploadSlip_(base64, mimeType, nickname) {
   if (!base64) throw new Error('ไม่พบไฟล์สลิป');
   if (String(mimeType).indexOf('image/') !== 0) throw new Error('สลิปต้องเป็นไฟล์รูปภาพเท่านั้น');
@@ -376,36 +502,14 @@ function uploadSlip_(base64, mimeType, nickname) {
   var file = slipFolder_().createFile(blob);
   file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
-  return {
-    id: file.getId(),
-    // Serves the raw image bytes, unlike drive.google.com/uc which can answer
-    // with an HTML interstitial that LINE cannot render.
-    url: 'https://lh3.googleusercontent.com/d/' + file.getId(),
-  };
+  return { id: file.getId(), url: 'https://drive.google.com/file/d/' + file.getId() + '/view' };
 }
 
-// Run on a time-driven trigger — see setupSlips.
+// Slips used to be deleted an hour after they were posted. They are now kept
+// as proof, but a project set up before that still has the hourly trigger
+// pointing here — so instead of deleting anything, this removes that trigger.
 function deleteExpiredSlips_() {
-  var id = lineProp_(LINE_PROP.SLIP_FOLDER_ID);
-  if (!id) return 0;
-  var folder;
-  try {
-    folder = DriveApp.getFolderById(id);
-  } catch (err) {
-    return 0;
-  }
-
-  var cutoff = Date.now() - SLIP_RETENTION_MS;
-  var files = folder.getFiles();
-  var removed = 0;
-  while (files.hasNext()) {
-    var file = files.next();
-    if (file.getDateCreated().getTime() < cutoff) {
-      file.setTrashed(true);
-      removed++;
-    }
-  }
-  return removed;
+  removeTriggers_('deleteExpiredSlips_');
 }
 
 // Run once from the editor after adding the LINE files.
@@ -414,23 +518,15 @@ function deleteExpiredSlips_() {
 // never trigger an authorization prompt, so if Drive hasn't been consented to,
 // the first real payment fails with "คุณไม่ได้รับอนุญาตให้เรียกใช้ DriveApp".
 // Creating the folder from the editor surfaces that prompt while someone is
-// there to click Authorize. deleteExpiredSlips_ is private (trailing
-// underscore) and so can't be selected in the Run dropdown — this is the
-// public entry point that stands in for it.
+// there to click Authorize. It also retires the old hourly slip cleanup.
 function setupSlips() {
   var folder = slipFolder_();
-
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'deleteExpiredSlips_') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('deleteExpiredSlips_').timeBased().everyHours(1).create();
+  // Older setups named the folder as temporary; it isn't any more.
+  if (folder.getName() !== SLIP_FOLDER_NAME) folder.setName(SLIP_FOLDER_NAME);
+  removeTriggers_('deleteExpiredSlips_');
 
   var message =
-    'พร้อมใช้งาน — โฟลเดอร์สลิป: "' +
-    folder.getName() +
-    '" (id: ' +
-    folder.getId() +
-    ') และตั้งลบอัตโนมัติทุก 1 ชั่วโมงแล้ว';
+    'พร้อมใช้งาน — โฟลเดอร์สลิป: "' + folder.getName() + '" (id: ' + folder.getId() + ')';
   console.log(message);
   return message;
 }
@@ -447,6 +543,9 @@ function getLineStatus() {
     linked_count: lineTargets_().length,
     app_url_set: !!lineProp_(LINE_PROP.APP_URL),
     trigger_words: triggerWords_(),
+    history_trigger_words: historyTriggerWords_(),
+    weekly_summary_scheduled: weeklySummaryScheduled_(),
+    weekly_sent_at: lineProp_(LINE_PROP.WEEKLY_SENT_AT) || null,
     last_pushed_at: lineProp_(LINE_PROP.LAST_PUSHED_AT) || null,
   };
 }
@@ -474,39 +573,33 @@ function pushOutstandingToLine(payload) {
   return { sent: list.length, groups: pushed.sent, warning: linePushWarning_(pushed) };
 }
 
-// The web app's "ยืนยันว่าชำระแล้ว" button. Settles first, because the ledger is
-// the source of truth and the announcement is only a courtesy — if LINE is down
-// the payment must still be recorded. A failed announcement comes back as a
-// warning rather than an error so the user isn't told to pay twice.
+// The web app's "ยืนยันว่าชำระแล้ว" button. Records the payment and keeps the
+// slip as its proof; nothing is posted to LINE — the payment appears in the
+// next weekly summary and in the history reply.
+//
+// The slip is uploaded before settling so its link can be written on the same
+// row. If Drive fails, nothing is recorded and the user simply tries again; if
+// the settle fails, the uploaded slip is thrown away.
 //
 // Cash needs no slip: there is nothing to photograph when money changes hands
-// at the court, so the group just gets the text with a cash marker.
+// at the court.
 function confirmPayment(payload) {
   if (!payload || !payload.player_key) throw new Error('ต้องระบุ player_key');
   var isCash = payload.method === 'cash';
   if (!isCash && !payload.slip_base64) throw new Error('กรุณาแนบสลิปหลักฐานการโอนเงิน');
 
   var player = findPlayerByKey_(payload.player_key);
-  var result = settlePlayer({
-    player_key: payload.player_key,
-    source: 'app',
-    method: isCash ? 'cash' : 'transfer',
-  });
+  // Sheets set up before slips were kept have no column to hold the link.
+  addColumnsIfMissing_(getSheet(SHEET_NAMES.SETTLEMENTS), ['slip_url']);
 
-  var warning = null;
-  var slip = null;
+  var slip = isCash ? null : uploadSlip_(payload.slip_base64, payload.slip_mime_type, player.nickname);
+  var result;
   try {
-    if (!isCash) {
-      slip = uploadSlip_(payload.slip_base64, payload.slip_mime_type, player.nickname);
-    }
-    // At least one group has the slip by now, so a partial failure keeps it.
-    var partial = announcePayment_(player, result.amount_settled, slip ? slip.url : null, isCash);
-    if (partial) {
-      warning = 'บันทึกการชำระเงินแล้ว แต่' + partial;
-      console.error(warning);
-    }
+    result = settlePlayer(
+      { player_key: payload.player_key, source: 'app', method: isCash ? 'cash' : 'transfer' },
+      { slip_url: slip ? slip.url : '' }
+    );
   } catch (err) {
-    // Don't leave the slip behind if it never made it into the chat.
     if (slip) {
       try {
         DriveApp.getFileById(slip.id).setTrashed(true);
@@ -514,8 +607,7 @@ function confirmPayment(payload) {
         console.error('slip cleanup failed: ' + cleanupErr);
       }
     }
-    warning = 'บันทึกการชำระเงินแล้ว แต่แจ้งเข้ากลุ่ม LINE ไม่สำเร็จ: ' + err.message;
-    console.error(warning);
+    throw err;
   }
 
   return {
@@ -523,120 +615,5 @@ function confirmPayment(payload) {
     amount_settled: result.amount_settled,
     new_balance: 0,
     settlement_id: result.settlement_id,
-    announced: !warning,
-    warning: warning,
   };
-}
-
-// Announces a settlement in the group as three messages in one push:
-//   1. who paid
-//   2. their slip
-//   3. the refreshed list, with that person already gone
-//
-// Called after settlePlayer has committed, so getOutstanding() here reflects the
-// payment — that's what makes the list drop them. LINE messages can't be edited,
-// so re-posting the list is the only way to keep the chat current.
-function announcePayment_(player, amount, slipUrl, isCash) {
-  var messages = [
-    {
-      type: 'text',
-      text:
-        player.nickname +
-        (player.department ? ' · ' + player.department : '') +
-        ' ยืนยันชำระเงิน ✅\nจำนวน ฿' +
-        formatAmount_(amount) +
-        (isCash ? '\nชำระด้วยเงินสด 💵' : ''),
-    },
-  ];
-  if (slipUrl) {
-    messages.push({ type: 'image', originalContentUrl: slipUrl, previewImageUrl: slipUrl });
-  }
-  messages.push(buildOutstandingFlex_(getOutstanding(), nowIso()));
-  return linePushWarning_(linePushAll_(messages));
-}
-
-// ---------------------------------------------------------------------------
-// Game edit / delete announcements
-// ---------------------------------------------------------------------------
-
-// A game is only ever visible to the group through what people owe, so editing
-// or deleting one silently moves money around behind their backs. These pushes
-// close that gap: every change to a recorded game is announced with what moved
-// and who it moved for.
-//
-// Best effort by design, like announcePayment_: the sheet is the ledger, and a
-// LINE outage must never stop someone correcting a wrong entry. Returns null on
-// success, or a warning string the web app can show next to the saved game.
-//
-// `after` is null for a delete. Silently does nothing until the bot is set up,
-// so a fresh install isn't nagged about LINE on every edit.
-function notifyGameChange_(kind, before, after) {
-  if (!lineProp_(LINE_PROP.TOKEN) || !lineTargets_().length) return null;
-  try {
-    var affected = affectedPlayers_(before, after);
-    var partial = linePushWarning_(
-      linePushAll_([buildGameChangeFlex_(kind, before, after, affected, nowIso())])
-    );
-    if (partial) {
-      partial = (kind === 'delete' ? 'ลบเกมแล้ว แต่' : 'บันทึกการแก้ไขแล้ว แต่') + partial;
-      console.error(partial);
-    }
-    return partial;
-  } catch (err) {
-    var warning =
-      (kind === 'delete' ? 'ลบเกมแล้ว' : 'บันทึกการแก้ไขแล้ว') +
-      ' แต่แจ้งเข้ากลุ่ม LINE ไม่สำเร็จ: ' +
-      (err && err.message ? err.message : err);
-    console.error(warning);
-    return warning;
-  }
-}
-
-// Everyone the change touched: whoever was in the game before, whoever is in it
-// after, or both. `was`/`now` are what that person owed for the game on each
-// side — two shares if they held two slots — and null when they weren't in it — which is what makes an added or removed player
-// readable at a glance.
-//
-// Balances are read after the write has committed, so the number next to each
-// name is what they actually owe now, not what they owed a moment ago.
-function affectedPlayers_(before, after) {
-  var balances = {};
-  getOutstanding().forEach(function (p) {
-    balances[p.player_key] = p.balance;
-  });
-
-  var index = {};
-  var order = [];
-  function slotFor(player) {
-    var entry = index[player.player_key];
-    if (!entry) {
-      entry = {
-        player_key: player.player_key,
-        nickname: player.nickname,
-        department: player.department,
-        was: null,
-        now: null,
-        balance: round2_(balances[player.player_key] || 0),
-      };
-      index[player.player_key] = entry;
-      order.push(entry);
-    }
-    return entry;
-  }
-
-  // Added up per slot, not per person: somebody covering two shares of the
-  // game should see both of them in the number next to their name.
-  if (before) {
-    before.players.forEach(function (p) {
-      var entry = slotFor(p);
-      entry.was = round2_((entry.was || 0) + Number(before.cost_per_player));
-    });
-  }
-  if (after) {
-    after.players.forEach(function (p) {
-      var entry = slotFor(p);
-      entry.now = round2_((entry.now || 0) + Number(after.cost_per_player));
-    });
-  }
-  return order;
 }

@@ -17,12 +17,11 @@ interface Props {
    *  the merge stands even if the game was never saved. */
   onClose: (playersMerged: boolean) => void;
   /**
-   * `lineWarning` is set when an edit saved but the LINE group wasn't told.
    * `playersMerged` means two people were folded into one on the way to saving,
    * which rewrites keys across the whole sheet — the caller's cached month is
    * stale and has to be re-read.
    */
-  onSaved: (saved: Game, lineWarning: string | null, playersMerged: boolean) => void;
+  onSaved: (saved: Game, playersMerged: boolean) => void;
 }
 
 function emptySlots(): PlayerInput[] {
@@ -169,10 +168,9 @@ export default function GameSheet({
         timestamp: timestampFor(date, editingGame?.timestamp),
       };
       if (editingGame) {
-        const saved = await editGame(editingGame.game_id, payload);
-        onSaved(saved, saved.line_warning, mergedAny.current);
+        onSaved(await editGame(editingGame.game_id, payload), mergedAny.current);
       } else {
-        onSaved(await addGame(payload), null, mergedAny.current);
+        onSaved(await addGame(payload), mergedAny.current);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกเกมไม่สำเร็จ');

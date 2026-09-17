@@ -152,6 +152,7 @@ function setupSheets() {
     'source',
     'line_user_id',
     'method',
+    'slip_url',
   ]);
   createSheetIfMissing_(ss, SHEET_NAMES.SETTINGS, ['key', 'value', 'updated_at']);
 
@@ -161,6 +162,7 @@ function setupSheets() {
     'source',
     'line_user_id',
     'method',
+    'slip_url',
   ]);
 
   var settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);

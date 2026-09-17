@@ -24,19 +24,9 @@ export interface Game {
   edited_at: string | null;
 }
 
-/**
- * A saved edit. Editing a game moves what people owe, so the bot announces it
- * in the group — `line_warning` is set when the game was saved but that
- * announcement failed, never when the save itself failed.
- */
-export interface GameEdit extends Game {
-  line_warning: string | null;
-}
-
 export interface GameDeletion {
   game_id: string;
   deleted: true;
-  line_warning: string | null;
 }
 
 export interface PlayerBalance {
@@ -79,6 +69,11 @@ export interface LineStatus {
   app_url_set: boolean;
   /** Typing any of these in the chat makes the bot post the list. */
   trigger_words: string[];
+  /** Typing any of these makes the bot post the last 7 days of payments. */
+  history_trigger_words: string[];
+  /** The Monday 09:00 summary trigger is installed (setupWeeklySummary). */
+  weekly_summary_scheduled: boolean;
+  weekly_sent_at: string | null;
   last_pushed_at: string | null;
 }
 
@@ -90,9 +85,6 @@ export interface PaymentConfirmation {
   amount_settled: number;
   new_balance: 0;
   settlement_id: string;
-  /** False when the payment was recorded but the LINE announcement failed. */
-  announced: boolean;
-  warning: string | null;
 }
 
 /** Everything the calendar screen needs, fetched in one request. */

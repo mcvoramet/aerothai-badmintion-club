@@ -243,198 +243,119 @@ function buildOutstandingFlex_(list, stampIso) {
 }
 
 // ---------------------------------------------------------------------------
-// Game edited / deleted
+// Payment history
 // ---------------------------------------------------------------------------
 
-var GAME_CHANGE_STYLE = {
-  edit: { title: '✏️ แก้ไขเกม', color: LINE_COLOR.PRIMARY, altVerb: 'แก้ไขเกม' },
-  delete: { title: '🗑️ ลบเกม', color: LINE_COLOR.DANGER, altVerb: 'ลบเกม' },
-};
+// Enough for a busy week; a bubble has a size cap, so the rest are counted
+// rather than listed.
+var LINE_FLEX_HISTORY_MAX_ROWS = 20;
 
-// A label on the left, the value (or the before → after pair) on the right.
-function fieldRow_(label, values) {
-  return {
-    type: 'box',
-    layout: 'horizontal',
-    spacing: 'sm',
-    paddingTop: 'sm',
-    paddingBottom: 'sm',
-    contents: [
-      { type: 'text', text: label, size: 'sm', color: LINE_COLOR.MUTED, flex: 4 },
-      { type: 'box', layout: 'vertical', flex: 6, contents: values },
-    ],
-  };
+// A slip link is only ever written by confirmPayment, but the sheet can be
+// edited by hand, and LINE rejects the whole message over one bad URI.
+function isSlipLink_(url) {
+  return /^https:\/\/\S+$/.test(String(url || ''));
 }
 
-// The whole point of the message is what moved, so an unchanged field reads as
-// a plain value and a changed one shows the old value struck through above the
-// new one. Stacked rather than side by side because a changed date is far too
-// long to fit on one line, and a truncated "5/8/2569 18:30 → 6/8/25…" would hide
-// exactly the part that changed.
-//
-// Pass before = null for a delete, where there is no "after" to compare to.
-function changeValue_(before, after) {
-  var current = {
-    type: 'text',
-    text: String(after),
-    size: 'sm',
-    weight: 'bold',
-    align: 'end',
-    color: LINE_COLOR.TEXT,
-    wrap: true,
-  };
-  if (before === null || before === undefined || String(before) === String(after)) {
-    return [current];
-  }
-  current.text = '→ ' + String(after);
-  return [
+// Name and date on the left, amount on the right. When there's a slip, the
+// name is styled as a link and the whole row opens it.
+function paidRow_(payment, first) {
+  var hasSlip = isSlipLink_(payment.slip_url);
+  var name = payment.nickname + (payment.department ? ' · ' + payment.department : '');
+  var when =
+    formatThaiDateTime_(payment.timestamp) +
+    ' · ' +
+    (payment.method === 'cash' ? '💵 เงินสด' : '🏦 โอน');
+
+  var right = [
     {
       type: 'text',
-      text: String(before),
-      size: 'xs',
+      text: '฿' + formatAmount_(payment.amount),
+      size: 'sm',
+      weight: 'bold',
       align: 'end',
-      color: LINE_COLOR.MUTED,
-      decoration: 'line-through',
-      wrap: true,
+      color: LINE_COLOR.SUCCESS,
     },
-    current,
   ];
-}
-
-// One row per person the change touched. The status line is what makes an added
-// or removed player obvious; the amount underneath is their share of this game,
-// and the balance is everything they still owe once the change is applied.
-function affectedRow_(entry, kind) {
-  var status, statusColor, amount, amountColor;
-  if (kind === 'delete') {
-    status = 'ยอดของเกมนี้ถูกยกออก';
-    statusColor = LINE_COLOR.DANGER;
-    amount = '−฿' + formatAmount_(entry.was);
-    amountColor = LINE_COLOR.DANGER;
-  } else if (entry.was === null) {
-    status = 'เพิ่มเข้าเกม';
-    statusColor = LINE_COLOR.SUCCESS;
-    amount = '+฿' + formatAmount_(entry.now);
-    amountColor = LINE_COLOR.SUCCESS;
-  } else if (entry.now === null) {
-    status = 'นำออกจากเกม';
-    statusColor = LINE_COLOR.DANGER;
-    amount = '−฿' + formatAmount_(entry.was);
-    amountColor = LINE_COLOR.DANGER;
-  } else {
-    status = 'อยู่ในเกมเหมือนเดิม';
-    statusColor = LINE_COLOR.MUTED;
-    amount =
-      entry.was === entry.now
-        ? '฿' + formatAmount_(entry.now)
-        : '฿' + formatAmount_(entry.was) + ' → ฿' + formatAmount_(entry.now);
-    amountColor = entry.was === entry.now ? LINE_COLOR.TEXT : LINE_COLOR.PRIMARY;
+  if (hasSlip) {
+    right.push({ type: 'text', text: 'ดูสลิป ›', size: 'xxs', align: 'end', color: LINE_COLOR.PRIMARY });
   }
 
-  var name = entry.nickname + (entry.department ? ' · ' + entry.department : '');
-
-  return {
+  var row = {
     type: 'box',
     layout: 'horizontal',
+    alignItems: 'center',
     spacing: 'md',
     paddingTop: 'sm',
     paddingBottom: 'sm',
+    borderWidth: first ? 'none' : '1px',
+    borderColor: LINE_COLOR.BORDER,
     contents: [
       {
         type: 'box',
         layout: 'vertical',
-        flex: 5,
+        flex: 6,
         contents: [
-          { type: 'text', text: name, size: 'sm', weight: 'bold', color: LINE_COLOR.TEXT, wrap: true },
-          { type: 'text', text: status, size: 'xxs', color: statusColor, wrap: true },
-        ],
-      },
-      {
-        type: 'box',
-        layout: 'vertical',
-        flex: 4,
-        contents: [
-          { type: 'text', text: amount, size: 'sm', weight: 'bold', align: 'end', color: amountColor, wrap: true },
           {
             type: 'text',
-            text: 'ค้างรวม ฿' + formatAmount_(entry.balance),
-            size: 'xxs',
-            align: 'end',
-            color: LINE_COLOR.MUTED,
+            text: name,
+            size: 'sm',
+            weight: 'bold',
+            color: hasSlip ? LINE_COLOR.PRIMARY : LINE_COLOR.TEXT,
+            decoration: hasSlip ? 'underline' : 'none',
+            wrap: true,
           },
+          { type: 'text', text: when, size: 'xxs', color: LINE_COLOR.MUTED, wrap: true },
         ],
       },
+      { type: 'box', layout: 'vertical', flex: 3, contents: right },
     ],
   };
-}
-
-// "4 คน", or "3 คน (4 ส่วน)" when somebody is in the game more than once —
-// the head count and the number of shares the cost was split into stop being
-// the same number as soon as one person covers two slots.
-function playersLabel_(game) {
-  var seen = {};
-  var people = 0;
-  game.players.forEach(function (p) {
-    if (!Object.prototype.hasOwnProperty.call(seen, p.player_key)) {
-      seen[p.player_key] = true;
-      people++;
-    }
-  });
-  return people === game.players.length
-    ? people + ' คน'
-    : people + ' คน (' + game.players.length + ' ส่วน)';
-}
-
-// Announces that a recorded game was edited or deleted.
-//
-// `after` is null for a delete, in which case every field is shown as it stood
-// when the game was removed. `affected` comes from affectedPlayers_ and already
-// carries each person's balance as of after the change.
-function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
-  var style = GAME_CHANGE_STYLE[kind] || GAME_CHANGE_STYLE.edit;
-  var latest = after || before;
-
-  function row(label, beforeText, afterText) {
-    return fieldRow_(label, changeValue_(after ? beforeText : null, afterText));
+  if (hasSlip) {
+    row.action = { type: 'uri', label: 'ดูสลิป', uri: payment.slip_url };
   }
+  return row;
+}
 
-  var details = [
-    row('วันที่เล่น', formatThaiDateTime_(before.timestamp), formatThaiDateTime_(latest.timestamp)),
-    row('ลูกขนไก่', before.shuttles_used + ' ลูก', latest.shuttles_used + ' ลูก'),
-    row('ผู้เล่น', playersLabel_(before), playersLabel_(latest)),
-    row('รวม', '฿' + formatAmount_(before.total_cost), '฿' + formatAmount_(latest.total_cost)),
-    row(
-      'คนละ',
-      '฿' + formatAmount_(before.cost_per_player),
-      '฿' + formatAmount_(latest.cost_per_player)
-    ),
-  ];
+// Who paid in the last PAID_HISTORY_DAYS, newest first — `payments` comes from
+// getRecentPayments_.
+function buildPaidHistoryFlex_(payments, stampIso) {
+  var total = payments.reduce(function (sum, p) {
+    return sum + Number(p.amount);
+  }, 0);
+  var shown = payments.slice(0, LINE_FLEX_HISTORY_MAX_ROWS);
+  var hidden = payments.length - shown.length;
+  var anySlip = shown.some(function (p) {
+    return isSlipLink_(p.slip_url);
+  });
 
-  var body = details.concat([
-    { type: 'separator', margin: 'md', color: LINE_COLOR.BORDER },
-    {
-      type: 'text',
-      text: 'ผู้เล่นที่เกี่ยวข้อง (' + affected.length + ' คน)',
-      size: 'xs',
-      weight: 'bold',
-      color: LINE_COLOR.MUTED,
-      margin: 'lg',
-    },
-    {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'none',
-      contents: affected.map(function (entry) {
-        return affectedRow_(entry, kind);
-      }),
-    },
-  ]);
-
-  var names = affected
-    .map(function (entry) {
-      return entry.nickname;
-    })
-    .join(', ');
+  var body;
+  if (!payments.length) {
+    body = [
+      {
+        type: 'text',
+        text: 'ยังไม่มีใครชำระในช่วง ' + PAID_HISTORY_DAYS + ' วันที่ผ่านมา',
+        size: 'sm',
+        align: 'center',
+        color: LINE_COLOR.MUTED,
+        wrap: true,
+        margin: 'xl',
+      },
+    ];
+  } else {
+    body = shown.map(function (p, i) {
+      return paidRow_(p, i === 0);
+    });
+    if (hidden > 0) {
+      body.push({
+        type: 'text',
+        text: '… และอีก ' + hidden + ' รายการ',
+        size: 'xs',
+        color: LINE_COLOR.MUTED,
+        align: 'center',
+        margin: 'lg',
+      });
+    }
+  }
 
   var bubble = {
     type: 'bubble',
@@ -443,12 +364,12 @@ function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
       type: 'box',
       layout: 'vertical',
       spacing: 'xs',
-      backgroundColor: style.color,
+      backgroundColor: LINE_COLOR.SUCCESS,
       paddingAll: 'lg',
       contents: [
         {
           type: 'text',
-          text: style.title,
+          text: '🧾 ประวัติการชำระเงิน',
           weight: 'bold',
           size: 'lg',
           color: LINE_COLOR.ON_PRIMARY,
@@ -457,9 +378,10 @@ function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
         {
           type: 'text',
           text:
-            kind === 'delete'
-              ? 'เกมนี้ถูกลบออกจากระบบแล้ว'
-              : 'ข้อมูลเกมถูกแก้ไข ยอดของผู้เล่นเปลี่ยนตามด้านล่าง',
+            PAID_HISTORY_DAYS + ' วันล่าสุด' +
+            (payments.length
+              ? ' · ' + payments.length + ' รายการ · รวม ฿' + formatAmount_(total)
+              : ''),
           size: 'sm',
           color: LINE_COLOR.ON_PRIMARY,
           wrap: true,
@@ -475,19 +397,19 @@ function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
     body: { type: 'box', layout: 'vertical', spacing: 'none', contents: body },
   };
 
-  // LINE rejects a bubble carrying an empty footer box, so the block only
-  // exists when there is actually a link to put in it.
-  if (appUrl_()) {
+  // LINE rejects a bubble carrying an empty footer box, so the hint only
+  // exists when there is something to tap.
+  if (anySlip) {
     bubble.footer = {
       type: 'box',
       layout: 'vertical',
-      spacing: 'sm',
       contents: [
         {
-          type: 'button',
-          style: 'secondary',
-          height: 'sm',
-          action: { type: 'uri', label: 'ดูรายชื่อค้างชำระ', uri: payListUri_() },
+          type: 'text',
+          text: 'แตะที่ชื่อเพื่อดูสลิปการโอนเงิน',
+          size: 'xxs',
+          color: LINE_COLOR.MUTED,
+          align: 'center',
         },
       ],
     };
@@ -495,8 +417,10 @@ function buildGameChangeFlex_(kind, before, after, affected, stampIso) {
 
   return {
     type: 'flex',
-    altText:
-      style.altVerb + ' ' + formatThaiDateTime_(latest.timestamp) + (names ? ' · ' + names : ''),
+    altText: payments.length
+      ? 'ประวัติการชำระเงิน ' + PAID_HISTORY_DAYS + ' วันล่าสุด ' + payments.length +
+        ' รายการ รวม ฿' + formatAmount_(total)
+      : 'ยังไม่มีใครชำระในช่วง ' + PAID_HISTORY_DAYS + ' วันที่ผ่านมา',
     contents: bubble,
   };
 }

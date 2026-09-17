@@ -2,7 +2,6 @@ import type {
   BootstrapData,
   Game,
   GameDeletion,
-  GameEdit,
   GamePayload,
   LineStatus,
   MergeResult,
@@ -100,12 +99,10 @@ export function addGame(payload: GamePayload): Promise<Game> {
   return apiPost<Game>('addGame', payload);
 }
 
-/** Announces the change in the LINE group; see `GameEdit.line_warning`. */
-export function editGame(gameId: string, payload: GamePayload): Promise<GameEdit> {
-  return apiPost<GameEdit>('editGame', { game_id: gameId, ...payload });
+export function editGame(gameId: string, payload: GamePayload): Promise<Game> {
+  return apiPost<Game>('editGame', { game_id: gameId, ...payload });
 }
 
-/** Announces the deletion in the LINE group; see `GameDeletion.line_warning`. */
 export function deleteGame(gameId: string): Promise<GameDeletion> {
   return apiPost<GameDeletion>('deleteGame', { game_id: gameId });
 }
@@ -151,12 +148,11 @@ export function getLineStatus(): Promise<LineStatus> {
 }
 
 /**
- * Settles the player and announces it in the LINE group.
+ * Settles the player and keeps the slip in Drive as proof. Nothing is posted to
+ * LINE — the payment shows up in the weekly summary and the history reply.
  *
  * A transfer must carry a slip; cash carries none, since there is nothing to
- * photograph when money changes hands at the court. The settlement is committed
- * first, so `announced: false` means the payment was recorded but the group
- * message failed — never that the payment was lost.
+ * photograph when money changes hands at the court.
  */
 export function confirmPayment(payload: {
   playerKey: string;

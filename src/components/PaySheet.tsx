@@ -114,7 +114,9 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
         `ยืนยันว่า ${detail.nickname} (${detail.department}) ชำระเงิน ${detail.balance.toFixed(
           2
         )} บาท แล้ว?\n\n${
-          isCash ? 'จะแจ้งเข้ากลุ่ม LINE ว่าชำระด้วยเงินสด' : 'สลิปจะถูกส่งเข้ากลุ่ม LINE'
+          isCash
+            ? 'จะแสดงในสรุปการชำระเงินของกลุ่ม LINE ทุกวันจันทร์'
+            : 'สลิปจะถูกเก็บไว้เป็นหลักฐาน และเปิดดูได้จากสรุปการชำระเงินในกลุ่ม LINE'
         }`
       )
     )
@@ -122,14 +124,12 @@ export default function PaySheet({ player, paymentDetails, onClose, onPaid }: Pr
     setSettling(true);
     setError(null);
     try {
-      const result = await confirmPayment({
+      await confirmPayment({
         playerKey: player.player_key,
         method,
         slipBase64: isCash ? undefined : slip?.base64,
         slipMimeType: isCash ? undefined : slip?.mimeType,
       });
-      // The payment is recorded either way; only the group message can fail.
-      if (result.warning) window.alert(result.warning);
       onPaid();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'บันทึกการชำระเงินไม่สำเร็จ');

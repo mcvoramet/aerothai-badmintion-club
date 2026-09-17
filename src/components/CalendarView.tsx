@@ -56,9 +56,6 @@ export default function CalendarView() {
   const [form, setForm] = useState<{ date: string; editing: Game | null } | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
-  // The change was saved, but the LINE group wasn't told about it. Worth
-  // showing — the group is how people learn their balance moved.
-  const [lineWarning, setLineWarning] = useState<string | null>(null);
 
   const games = useMemo(() => data?.games ?? [], [data]);
   const players = data?.players ?? [];
@@ -117,10 +114,9 @@ export default function CalendarView() {
   // Merging two players is the exception: it renames a person across every game
   // and settlement in the sheet, so anything already on screen is out of date
   // and the month has to come back from the server.
-  function handleSaved(saved: Game, warning: string | null, playersMerged: boolean) {
+  function handleSaved(saved: Game, playersMerged: boolean) {
     setForm(null);
     setMutationError(null);
-    setLineWarning(warning);
     update(applySaved(saved));
     if (playersMerged) void refresh();
   }
@@ -130,10 +126,8 @@ export default function CalendarView() {
       return;
     setDeletingId(game.game_id);
     setMutationError(null);
-    setLineWarning(null);
     try {
-      const result = await deleteGame(game.game_id);
-      setLineWarning(result.line_warning);
+      await deleteGame(game.game_id);
       update((current) => ({
         ...current,
         games: current.games.filter((g) => g.game_id !== game.game_id),
@@ -173,8 +167,6 @@ export default function CalendarView() {
         {(error || mutationError) && (
           <div className="error-banner">{mutationError ?? error}</div>
         )}
-
-        {lineWarning && <div className="warning-banner">{lineWarning}</div>}
 
         <div className="calendar-grid">
           {WEEKDAYS.map((w) => (
